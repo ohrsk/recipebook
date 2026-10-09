@@ -107,6 +107,7 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.3
 .detail h1{font-size:1.6rem}
 .desc{color:var(--muted);margin:0}
 .facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.facts.one{grid-template-columns:1fr}
 .fact{background:var(--surface);border-radius:12px;padding:10px 14px;display:grid}
 .fact small{color:var(--muted);font-size:.75rem;letter-spacing:.06em}
 .fact b{font-family:var(--f-display);font-size:1.15rem;font-variant-numeric:tabular-nums}
@@ -174,6 +175,12 @@ form{display:grid;gap:16px}
 .sites{display:flex;flex-wrap:wrap;gap:6px}
 .steps-guide{margin:0;padding-left:1.3em;display:grid;gap:6px;font-size:.9rem}
 .code{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;background:var(--bg);border-radius:8px;padding:8px 10px;overflow-wrap:anywhere}
+.tagpick{display:flex;flex-wrap:wrap;gap:6px}
+.tagpick .chip{font-size:.9rem;padding:6px 14px}
+.tagpick .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.tagmgr{display:flex;flex-wrap:wrap;gap:6px}
+.tagmgr span{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);border-radius:999px;padding:3px 4px 3px 12px;font-size:.9rem}
+.tagmgr button{border:none;background:transparent;color:var(--muted);width:26px;height:26px;border-radius:50%;font-size:.85rem}
 .review{background:var(--accent-soft);border-radius:10px;padding:10px 14px;font-size:.85rem;margin:0}
 .src{font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
 .src a{color:var(--ink)}
@@ -206,7 +213,7 @@ const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
 
 /* ---------- state ---------- */
-const S={recipes:[],q:"",tag:null,fav:false,sort:lsGet("sort")||"new",view:"list",id:null,draft:null,photoFile:null,photoPreview:null,confirmDel:false,cooking:false,cur:0,checked:{},saving:false,err:"",bk:{msg:"",err:""},persist:null,imp:{err:""}};
+const S={recipes:[],q:"",tag:null,fav:false,sort:(lsGet("sort")==="time"?"new":lsGet("sort"))||"new",tagDel:null,view:"list",id:null,draft:null,photoFile:null,photoPreview:null,confirmDel:false,cooking:false,cur:0,checked:{},saving:false,err:"",bk:{msg:"",err:""},persist:null,imp:{err:""}};
 const photoURLs=new Map();
 let wake=null;
 const $app=document.getElementById("app");
@@ -221,6 +228,10 @@ async function loadPhoto(id){if(!id||photoURLs.has(id))return;try{const b=await 
 async function reload(){S.recipes=await dbAll();await Promise.all(S.recipes.map(r=>loadPhoto(r.photo)))}
 
 /* ---------- list ---------- */
+const DEFAULT_TAGS=["簡単","ベジタリアン","おもてなし"];
+function getTagList(){let l=null;try{l=JSON.parse(lsGet("tagList")||"null")}catch(e){}if(!Array.isArray(l)){const used=[];S.recipes.forEach(r=>(r.tags||[]).forEach(t=>{if(!used.includes(t))used.push(t)}));l=[...DEFAULT_TAGS,...used.filter(t=>!DEFAULT_TAGS.includes(t))];lsSet("tagList",JSON.stringify(l))}return l}
+function setTagList(l){lsSet("tagList",JSON.stringify([...new Set(l.map(t=>String(t).trim()).filter(Boolean))]))}
+function addTagToList(t){t=String(t||"").trim().replace(/^#/,"");if(!t)return null;const l=getTagList();if(!l.includes(t)){l.push(t);setTagList(l)}return t}
 function allTags(){const m=new Map();S.recipes.forEach(r=>(r.tags||[]).forEach(t=>m.set(t,(m.get(t)||0)+1)));return [...m.entries()].sort((a,b)=>b[1]-a[1]).map(e=>e[0])}
 function filtered(){
   const q=S.q.trim().toLowerCase();
@@ -245,7 +256,7 @@ function listBody(list){
       <div class="thumb">${photoUrl(r)?`<img src="${esc(photoUrl(r))}" alt="" loading="lazy">`:initial(r.title)}</div>
       <div class="card-body">
         <h2>${esc(r.title)}</h2>
-        <div class="meta">${r.minutes?`<span>⏱ ${esc(r.minutes)}分</span>`:""}${r.servings?`<span>${esc(r.servings)}人分</span>`:""}${r.favorite?`<span class="star">★ お気に入り</span>`:""}${r.sample?`<span class="sample">サンプル</span>`:""}</div>
+        <div class="meta">${r.servings?`<span>${esc(r.servings)}人分</span>`:""}${r.favorite?`<span class="star">★ お気に入り</span>`:""}${r.sample?`<span class="sample">サンプル</span>`:""}</div>
         ${(r.tags||[]).length?`<div class="tags">${r.tags.slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>`:""}
       </div>
     </button>`).join("")}</div>`;
@@ -271,7 +282,6 @@ function renderList(){
       <div class="row-tools"><span class="count" id="shown">${S.recipes.length?list.length+"件を表示":""}</span>
         <label><span class="count">並び順 </span><select id="sort" aria-label="並び順">
           <option value="new" ${S.sort==="new"?"selected":""}>新しい順</option>
-          <option value="time" ${S.sort==="time"?"selected":""}>時短順</option>
           <option value="name" ${S.sort==="name"?"selected":""}>名前順</option>
         </select></label></div>
       ${backupNag()}
@@ -300,8 +310,7 @@ function renderDetail(){
         ${r.description?`<p class="desc">${esc(r.description)}</p>`:""}
         ${(r.tags||[]).length||r.sample?`<div class="tags">${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}${r.sample?`<span class="sample">サンプル</span>`:""}</div>`:""}
       </div>
-      <div class="facts">
-        <div class="fact"><small>調理時間</small><b>${r.minutes?esc(r.minutes)+" 分":"—"}</b></div>
+      <div class="facts one">
         <div class="fact"><small>分量</small><b>${r.servings?esc(r.servings)+" 人分":"—"}</b></div>
       </div>
       <section class="section">
@@ -335,11 +344,11 @@ function renderEdit(){
         ${prev?`<img class="preview" src="${esc(prev)}" alt="選んだ写真">`:""}
         <div class="photo-row"><input id="f-photo" type="file" accept="image/*" hidden><button type="button" class="btn" data-act="pick">${prev?"写真を変更":"写真を選ぶ"}</button>${prev?`<button type="button" class="btn ghost" data-act="nophoto">写真を外す</button>`:""}</div></div>
       <div class="field"><label for="f-desc">ひとこと</label><input id="f-desc" name="description" value="${esc(d.description)}" placeholder="例：甘辛だれでご飯がすすむ定番"></div>
-      <div class="two">
-        <div class="field"><label for="f-min">調理時間（分）</label><input id="f-min" name="minutes" type="number" inputmode="numeric" min="0" value="${esc(d.minutes||"")}"></div>
-        <div class="field"><label for="f-srv">分量（人分）</label><input id="f-srv" name="servings" type="number" inputmode="numeric" min="0" value="${esc(d.servings||"")}"></div>
-      </div>
-      <div class="field"><label for="f-tags">タグ</label><input id="f-tags" name="tags" value="${esc((d.tags||[]).join("、"))}" placeholder="例：和食、作り置き、お弁当"><span class="hint">「、」かスペースで区切ります</span></div>
+      <div class="field" style="max-width:50%"><label for="f-srv">分量（人分）</label><input id="f-srv" name="servings" type="number" inputmode="numeric" min="0" value="${esc(d.servings||"")}"></div>
+      <div class="field"><label>タグ</label>
+        <div class="tagpick" role="group" aria-label="タグを選ぶ">${[...new Set([...getTagList(),...(d.tags||[])])].map(t=>`<button type="button" class="chip" data-tagpick="${esc(t)}" aria-pressed="${(d.tags||[]).includes(t)}">${esc(t)}</button>`).join("")}</div>
+        <div class="urlrow" style="margin-top:4px"><input id="f-newtag" placeholder="新しいタグを追加" autocomplete="off"><button type="button" class="btn" data-act="addtag">追加</button></div>
+        <span class="hint">タップで選ぶ／外す。タグの削除や並べ替えは設定画面でできます</span></div>
       <div class="field"><label for="f-ing">材料</label><textarea id="f-ing" name="ingredients" placeholder="鶏もも肉　1枚&#10;しょうゆ　大さじ2&#10;みりん　大さじ2">${esc((d.ingredients||[]).map(i=>i.amount?i.name+"　"+i.amount:i.name).join("\n"))}</textarea><span class="hint">1行に1つ。材料名と分量の間にスペースを入れます</span></div>
       <div class="field"><label for="f-steps">作り方</label><textarea id="f-steps" name="steps" style="min-height:160px" placeholder="鶏肉の皮目をフォークで刺す&#10;フライパンで皮目から焼く">${esc((d.steps||[]).join("\n"))}</textarea><span class="hint">1行に1手順。番号は自動で付きます</span></div>
       <div class="field"><label for="f-memo">メモ・コツ</label><textarea id="f-memo" name="memo" style="min-height:80px">${esc(d.memo)}</textarea></div>
@@ -366,6 +375,13 @@ function renderSettings(){
         <p class="hint" style="font-size:.78rem;color:var(--muted);margin:0">書き出したファイルは、iCloud Drive・Googleドライブ・メールなどに保存しておくと安心です。読み込むと、同じレシピは上書きされ、それ以外は追加されます。</p>
       </section>
       <section class="section">
+        <h3>タグの管理</h3>
+        <p class="desc">レシピの編集画面で選べるタグです。</p>
+        <div class="tagmgr">${getTagList().map((t,i)=>`<span>${esc(t)}<button data-tagup="${i}" aria-label="${esc(t)}を前へ" ${i?"":"disabled"}>←</button><button data-tagrm="${esc(t)}" aria-label="${esc(t)}を削除">✕</button></span>`).join("")||`<span class="desc">タグがありません</span>`}</div>
+        ${S.tagDel?`<div class="del-confirm"><p>「${esc(S.tagDel)}」を削除しますか？${(n=>n?` ${n}品のレシピからも外れます。`:"")(S.recipes.filter(r=>(r.tags||[]).includes(S.tagDel)).length)}</p><button class="btn danger" data-act="tagdel-yes">削除する</button><button class="btn ghost" data-act="tagdel-no">やめる</button></div>`:""}
+        <div class="urlrow"><input id="s-newtag" placeholder="新しいタグ" autocomplete="off"><button class="btn" data-act="addtag-s">追加</button></div>
+      </section>
+      <section class="section">
         <h3>ホーム画面に追加</h3>
         ${standalone?`<p class="desc">アプリとして開いています。電波がない場所でも使えます。</p>`:`<p class="desc">iPhoneはSafariの共有ボタン → 「ホーム画面に追加」、AndroidはChromeのメニュー → 「ホーム画面に追加」でアプリとして使えます。追加すると、保存したデータが消えにくくなります。</p>`}
         <p class="desc" style="font-size:.85rem">データの保護：${S.persist===true?"このブラウザに長期保存を許可されています。":S.persist===false?"ブラウザの判断で消える可能性があります。ホーム画面に追加し、バックアップも取っておくと安心です。":"確認できませんでした。"}</p>
@@ -379,7 +395,7 @@ async function doExport(){
   try{
     const photos={};
     for(const r of S.recipes){if(r.photo){const b=await photoGet(r.photo);if(b)photos[r.photo]=await blobToDataURL(b)}}
-    const data={app:"saki-recipe-book",version:1,exportedAt:new Date().toISOString(),recipes:S.recipes,photos};
+    const data={app:"saki-recipe-book",version:1,exportedAt:new Date().toISOString(),recipes:S.recipes,photos,settings:{tagList:getTagList()}};
     const d=new Date(),name=`recipe-backup-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.json`;
     const file=new File([JSON.stringify(data)],name,{type:"application/json"});
     let shared=false;
@@ -405,6 +421,7 @@ async function doRestore(file){
       await dbPut(r);n++;
     }
     await reload();
+    if(data.settings&&Array.isArray(data.settings.tagList))setTagList([...getTagList(),...data.settings.tagList]);
     S.bk={msg:`${n}品を読み込みました。`,err:""};
   }catch(e){S.bk={msg:"",err:"このファイルは読み込めませんでした。「バックアップを書き出す」で作ったファイルを選んでください。"}}
   render();
@@ -577,7 +594,7 @@ async function importPayload(text){
   let photo=null;if(typeof d.photo==="string"&&d.photo.startsWith("data:image/")){try{photo=await (await fetch(d.photo)).blob()}catch(e){}}
   const url=safeUrl(d.url)||"";const dup=url&&S.recipes.find(x=>x.sourceUrl===url);
   S.draft={title:String(r.title||""),description:String(r.description||""),minutes:Number(r.minutes)||"",servings:Number(r.servings)||"",
-    tags:arr(r.tags).map(String).slice(0,6),ingredients:arr(r.ingredients).map(i=>({name:String(i&&i.name||""),amount:String(i&&i.amount||"")})).filter(i=>i.name),
+    tags:arr(r.tags).map(String).filter(t=>getTagList().includes(t)),ingredients:arr(r.ingredients).map(i=>({name:String(i&&i.name||""),amount:String(i&&i.amount||"")})).filter(i=>i.name),
     steps:arr(r.steps).map(String).filter(Boolean),memo:String(r.memo||""),sourceUrl:url,photo:null,imported:true,dupOf:dup?dup.title:null};
   S.err="";S.photoFile=photo;S.photoPreview=photo?URL.createObjectURL(photo):null;
   S.imp={err:""};S.view="edit";render();window.scrollTo(0,0);
@@ -596,8 +613,8 @@ async function resizeImage(file){
 }
 function readForm(){
   const f=document.getElementById("f");if(!f)return;const g=n=>f.elements[n].value;
-  Object.assign(S.draft,{title:g("title"),description:g("description"),minutes:g("minutes"),servings:g("servings"),
-    tags:g("tags").split(/[、,，\s　]+/).map(t=>t.trim()).filter(Boolean),ingredients:parseIng(g("ingredients")),
+  Object.assign(S.draft,{title:g("title"),description:g("description"),servings:g("servings"),
+    ingredients:parseIng(g("ingredients")),
     steps:g("steps").split("\n").map(s=>s.trim()).filter(Boolean),memo:g("memo"),sourceUrl:g("sourceUrl")});
 }
 async function save(){
@@ -612,8 +629,8 @@ async function save(){
     }
     if(old&&old.photo&&old.photo!==d.photo){photoDel(old.photo).catch(()=>{})}
     const now=Date.now();
-    const rec={id:d.id||uid(),title:d.title.trim(),description:(d.description||"").trim(),minutes:Number(d.minutes)||null,servings:Number(d.servings)||null,
-      tags:d.tags,ingredients:d.ingredients,steps:d.steps,memo:(d.memo||"").trim(),sourceUrl:safeUrl(d.sourceUrl)||null,photo:d.photo||null,
+    const rec={id:d.id||uid(),title:d.title.trim(),description:(d.description||"").trim(),minutes:d.minutes||null,servings:Number(d.servings)||null,
+      tags:d.tags||[],ingredients:d.ingredients,steps:d.steps,memo:(d.memo||"").trim(),sourceUrl:safeUrl(d.sourceUrl)||null,photo:d.photo||null,
       favorite:!!d.favorite,createdAt:d.createdAt||now,updatedAt:now,sample:false};
     await dbPut(rec);await reload();
     S.id=rec.id;S.view="detail";S.draft=null;S.photoFile=null;S.photoPreview=null;S.saving=false;
@@ -623,13 +640,20 @@ async function save(){
 async function setWake(on){try{if(on&&"wakeLock" in navigator){wake=await navigator.wakeLock.request("screen")}else if(wake){await wake.release();wake=null}}catch(e){}}
 
 $app.addEventListener("click",async e=>{
-  const t=e.target.closest("[data-act],[data-open],[data-tag],[data-fav],[data-step]");if(!t)return;
+  const t=e.target.closest("[data-act],[data-open],[data-tag],[data-fav],[data-step],[data-tagpick],[data-tagrm],[data-tagup]");if(!t)return;
+  if(t.dataset.tagpick!==undefined){const v=t.dataset.tagpick,tg=S.draft.tags||(S.draft.tags=[]);const i=tg.indexOf(v);if(i>=0)tg.splice(i,1);else tg.push(v);t.setAttribute("aria-pressed",String(i<0));return}
+  if(t.dataset.tagrm!==undefined){S.tagDel=t.dataset.tagrm;render();return}
+  if(t.dataset.tagup!==undefined){const i=+t.dataset.tagup,l=getTagList();if(i>0){[l[i-1],l[i]]=[l[i],l[i-1]];setTagList(l)}render();return}
   if(t.dataset.open){S.id=t.dataset.open;S.view="detail";S.confirmDel=false;S.cooking=false;S.cur=0;render();window.scrollTo(0,0);return}
   if(t.dataset.tag!==undefined){S.tag=S.tag===t.dataset.tag?null:t.dataset.tag;render();return}
   if(t.hasAttribute("data-fav")){S.fav=!S.fav;render();return}
   if(t.dataset.step!==undefined){if(S.cooking){S.cur=+t.dataset.step;render()}return}
   const a=t.dataset.act,r=S.recipes.find(x=>x.id===S.id);
   if(a==="new"){S.draft={title:"",description:"",minutes:"",servings:"",tags:[],ingredients:[],steps:[],memo:"",photo:null,sourceUrl:""};S.err="";S.photoFile=null;S.photoPreview=null;S.view="edit";render();window.scrollTo(0,0)}
+  else if(a==="addtag"){readForm();const v=addTagToList(document.getElementById("f-newtag").value);if(v){const tg=S.draft.tags||(S.draft.tags=[]);if(!tg.includes(v))tg.push(v)}render();const i=document.getElementById("f-newtag");if(i)i.focus()}
+  else if(a==="addtag-s"){const v=addTagToList(document.getElementById("s-newtag").value);if(v)toast("「"+v+"」を追加しました");render()}
+  else if(a==="tagdel-no"){S.tagDel=null;render()}
+  else if(a==="tagdel-yes"){const v=S.tagDel;setTagList(getTagList().filter(x=>x!==v));for(const r of S.recipes.filter(r=>(r.tags||[]).includes(v))){await dbPut({...r,tags:r.tags.filter(x=>x!==v)})}await reload();S.tagDel=null;if(S.tag===v)S.tag=null;toast("削除しました");render()}
   else if(a==="clear"){S.q="";S.tag=null;S.fav=false;render()}
   else if(a==="back"){S.view="list";setWake(false);S.cooking=false;render()}
   else if(a==="settings"){S.bk={msg:"",err:""};S.view="settings";render();window.scrollTo(0,0)}
@@ -661,6 +685,7 @@ $app.addEventListener("change",e=>{
 $app.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;if(!e.isComposing)updateResults()}});
 $app.addEventListener("compositionend",e=>{if(e.target.id==="q"){S.q=e.target.value;updateResults()}});
 $app.addEventListener("submit",e=>{e.preventDefault();save()});
+$app.addEventListener("keydown",e=>{if(e.key!=="Enter"||e.isComposing)return;if(e.target.id==="f-newtag"){e.preventDefault();document.querySelector('[data-act="addtag"]').click()}else if(e.target.id==="s-newtag"){e.preventDefault();document.querySelector('[data-act="addtag-s"]').click()}});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&S.cooking)setWake(true)});
 
 /* ---------- first-run samples ---------- */
