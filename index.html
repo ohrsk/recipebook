@@ -564,19 +564,33 @@ function renderImport(){
       </section>
       <section class="section">
         <h3>本の写真から</h3>
-        <p class="desc">「写真」アプリで本のページの写真を開き、共有ボタン →「写真からレシピ」。</p>
+        <p class="desc">「写真」アプリで本のページの写真を開き、共有ボタン →「写真からレシピ」。撮った写真はそのままレシピの写真になります。</p>
         <details><summary class="desc" style="cursor:pointer"><b>ショートカット「写真からレシピ」の作り方</b>（最初に1回だけ）</summary>
         <ol class="steps-guide" style="margin-top:8px">
           <li>「ショートカット」アプリの「＋」で新しいショートカットを作り、名前を「写真からレシピ」にします。</li>
           <li>下の「ⓘ」を開き、<b>「共有シートに表示」</b>をオンにします。受け入れる種類は「イメージ」だけにします。</li>
-          <li>「アクションを追加」で「テキスト」と検索し、<b>「イメージからテキストを抽出」</b>を追加します。薄い文字の「イメージ」をタップして「ショートカットの入力」を選びます。</li>
-          <li>続けて<b>「クリップボードにコピー」</b>を追加して「完了」。</li>
-        </ol></details>
+          <li><b>「イメージからテキストを抽出」</b>を追加。薄い「イメージ」をタップして「ショートカットの入力」を選びます。</li>
+          <li><b>「イメージのサイズを変更」</b>を追加。入力をタップして<b>「ショートカットの入力」</b>に変え、幅を「1200」にします。</li>
+          <li><b>「イメージを変換」</b>を追加し、形式を「JPEG」にします。</li>
+          <li><b>「Base64でエンコード」</b>を追加します（「表示を増やす」で改行を「なし」にするとより確実です）。</li>
+          <li><b>「テキスト」</b>を追加し、中身を次の3行にします：1行目に変数「Base64でエンコードされたテキスト」、2行目に「---」、3行目に変数「イメージから抽出したテキスト」。</li>
+          <li><b>「クリップボードにコピー」</b>を追加し、コピーするものが「テキスト」になっていることを確認して「完了」。</li>
+        </ol>
+        <p class="desc" style="font-size:.85rem">写真なしの前の作り方（テキストを抽出 → クリップボードにコピー）でも、文字だけは取り込めます。</p></details>
         <details><summary class="desc" style="cursor:pointer">ショートカットを使わない方法</summary>
           <p class="desc" style="margin-top:8px">「写真」アプリで写真を開き、右下の文字認識ボタン（四角に線のマーク）→ 文字を長押しして「すべてを選択」→「コピー」。そのあと上のボタンで追加できます。</p></details>
         <p class="desc" style="font-size:.85rem">きれいに読み取るコツ：ページを真上から、明るい場所で撮り、レシピ1品だけが写るようにします。2段組みのページは順番がずれることがあるので、保存前に確認してください。</p>
       </section>
     </div>`;
+}
+// Shortcut output: base64 image (one line, or wrapped every 64/76 chars) + optional "---" + OCR text
+function splitPhotoText(text){
+  const lines=String(text).split(/\r?\n/);let i=0,b64="",w=0;
+  while(i<lines.length&&/^[A-Za-z0-9+\/=]{40,}$/.test(lines[i].trim())){const l=lines[i].trim();if(!w)w=l.length;b64+=l;i++;if(l.endsWith("="))break}
+  if(b64&&i<lines.length&&(w===64||w===76)&&/^[A-Za-z0-9+\/]*={0,2}$/.test(lines[i].trim())&&lines[i].trim().length>0&&lines[i].trim().length<w){b64+=lines[i].trim();i++}
+  if(!b64||!/^(\/9j\/|iVBORw0KGgo)/.test(b64))return {b64:null,text:String(text)};
+  while(i<lines.length&&/^\s*(-{2,}|ー{2,}|―+)?\s*$/.test(lines[i]))i++;
+  return {b64,text:lines.slice(i).join("\n")};
 }
 async function importPayload(text){
   const m=S.imp;m.err="";text=String(text||"").trim();
@@ -585,10 +599,13 @@ async function importPayload(text){
   let d=null;try{d=JSON.parse(text)}catch(e){}
   if(!d||d.app!=="saki-recipe-import"||!d.recipe){
     if(/^https?:\/\/\S+$/.test(text)){m.err="URLがコピーされています。Safariでそのページを開き、共有ボタンから「レシピ帖に追加」を使ってください。";return render()}
-    const t=parseRecipeText(text);
-    if(!t){m.err="読み取れる文字がありませんでした。";return render()}
-    S.draft={title:t.title,description:"",minutes:t.minutes||"",servings:t.servings||"",tags:[],ingredients:t.ingredients,steps:t.steps,memo:t.memo,sourceUrl:"",photo:null,imported:t.failed?"text-failed":"text"};
-    S.err="";S.photoFile=null;S.photoPreview=null;S.imp={err:""};S.view="edit";render();window.scrollTo(0,0);return;
+    const sp=splitPhotoText(text);let photo=null;
+    if(sp.b64){try{const bl=await (await fetch("data:"+(sp.b64.startsWith("iVBOR")?"image/png":"image/jpeg")+";base64,"+sp.b64)).blob();if(bl.size>100)photo=bl}catch(e){}}
+    const t=parseRecipeText(sp.text);
+    if(!t&&!photo){m.err="読み取れる文字がありませんでした。";return render()}
+    const tt=t||{title:"",servings:null,ingredients:[],steps:[],memo:"",failed:true};
+    S.draft={title:tt.title,description:"",servings:tt.servings||"",tags:[],ingredients:tt.ingredients,steps:tt.steps,memo:tt.memo,sourceUrl:"",photo:null,imported:tt.failed?"text-failed":"text"};
+    S.err="";S.photoFile=photo;S.photoPreview=photo?URL.createObjectURL(photo):null;S.imp={err:""};S.view="edit";render();window.scrollTo(0,0);return;
   }
   const r=d.recipe,arr=x=>Array.isArray(x)?x:[];
   let photo=null;if(typeof d.photo==="string"&&d.photo.startsWith("data:image/")){try{photo=await (await fetch(d.photo)).blob()}catch(e){}}
