@@ -277,7 +277,7 @@ function renderList(){
       ${backupNag()}
     </header>
     <div id="results">${listBody(list)}</div>
-    <div class="fab-row"><button class="fab sub" data-act="import">サイトから</button><button class="fab" data-act="new">＋ 追加</button></div>`;
+    <div class="fab-row"><button class="fab sub" data-act="import">取り込む</button><button class="fab" data-act="new">＋ 追加</button></div>`;
 }
 
 /* ---------- detail ---------- */
@@ -328,7 +328,7 @@ function renderEdit(){
   $app.innerHTML=`
     <div class="bar"><button class="icon-btn" data-act="cancel">← キャンセル</button><h2 style="font-size:1rem">${d.id?"レシピを編集":"新しいレシピ"}</h2><span style="width:60px"></span></div>
     <form id="f" novalidate>
-      ${d.imported?`<p class="review">サイトから読み取った内容です。分量や手順を確認してから保存してください。</p>`:""}
+      ${d.imported==="text-failed"?`<p class="review">材料と作り方をうまく分けられませんでした。読み取った文字をメモ欄に入れてあるので、見ながら直してください。</p>`:d.imported==="text"?`<p class="review">写真の文字から読み取った内容です。順番や分量がずれていないか確認してから保存してください。</p>`:d.imported?`<p class="review">サイトから読み取った内容です。分量や手順を確認してから保存してください。</p>`:""}
       ${d.dupOf?`<p class="review">このサイトのレシピは「${esc(d.dupOf)}」として登録済みです。保存すると別のレシピとして追加されます。</p>`:""}
       <div class="field"><label for="f-title">料理名</label><input id="f-title" name="title" value="${esc(d.title)}" placeholder="例：鶏の照り焼き" required></div>
       <div class="field photo-pick"><label for="f-photo">写真</label>
@@ -410,26 +410,115 @@ async function doRestore(file){
   render();
 }
 
+/* ---------- plain text (photo OCR / pasted) → recipe ---------- */
+const TP_Z2H=s=>String(s||"").replace(/[０-９Ａ-Ｚａ-ｚ．／（）]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+const TP_AMT_HEAD="(?:大さじ|小さじ|大匙|小匙|カップ|少々|適量|適宜|ひとつまみ|ひとつかみ|少量|各|約|お好みで|好みで|1/2|1/3|1/4|[0-9０-９½¼⅓⅔¾]+)";
+const TP_AMT_ONLY=new RegExp("^"+TP_AMT_HEAD+"[^ぁ-んァ-ヶ一-龠]{0,12}$|^(?:大さじ|小さじ|カップ|少々|適量|適宜|ひとつまみ|少量|各)\\S{0,14}$|^[0-9０-９½¼⅓⅔¾./／〜~～-]+\\s*(?:g|ｇ|kg|ml|mL|ｍｌ|cc|L|個|本|枚|片|かけ|株|束|袋|缶|パック|尾|切れ|合|カップ|房|丁|玉|cm|ｃｍ|粒|杯|膳|つまみ|人分)[^ぁ-んァ-ヶ一-龠]{0,12}$");
+const TP_H_ING=/^[\s【［\[〈<《(（■●◆□・]*(材料|ざいりょう)/;
+const TP_H_STEP=/^[\s【［\[〈<《(（■●◆□・]*(作り方|つくり方|作りかた|手順|下ごしらえ|調理法)/;
+const TP_H_MEMO=/^[\s【［\[〈<《(（■●◆□・]*(ポイント|POINT|Point|コツ|メモ|MEMO|Memo|memo|アドバイス|ひと言|ひとこと)/;
+const TP_STEP_NUM=/^\s*(?:[0-9０-９]{1,2}\s*[.．、)）:：]?|[(（][0-9０-９]{1,2}[)）]|[①-⑳]|[❶-❿➊-➓]|STEP\s*[0-9]+|ステップ\s*[0-9]+)\s*(?=\S)/;
+function tpCleanLine(l){return String(l||"").replace(/[ 　\t]/g," ").replace(/\s+/g," ").trim()}
+function tpSplitNameAmount(s){
+  s=s.replace(/^[・･●○◯◎■□◆◇★☆\-–]\s*/,"");
+  let m=s.match(/^(.+?)\s*(?:…+|\.{2,}|・{2,}|‥+|：|:)\s*(.+)$/);
+  if(m)return {name:m[1].trim(),amount:m[2].trim()};
+  m=s.match(new RegExp("^(.+?)\\s+("+TP_AMT_HEAD+".*)$"));
+  if(m&&!/^[0-9０-９]/.test(m[1]))return {name:m[1].trim(),amount:m[2].trim()};
+  m=s.match(/^([^0-9０-９]+?)((?:大さじ|小さじ|カップ|少々|適量|適宜|ひとつまみ|少量)\S*|[0-9０-９½¼⅓][0-9０-９./／〜~～-]*\s*\S{0,10})$/);
+  if(m&&m[1].length>=1)return {name:m[1].trim(),amount:m[2].trim()};
+  return {name:s.trim(),amount:""};
+}
+function tpIsGroupLine(s){return /^[【［\[〈<《(（]?\s*[A-ZＡ-Ｚ]\s*[】］\]〉>》)）]?(?:\s*[（(].*[)）])?\s*[:：]?$/.test(s)||/^[【［\[〈<《][^】］\]〉>》]{1,12}[】］\]〉>》]$/.test(s)}
+function tpIngredients(lines){
+  const items=[];
+  for(const raw of lines){
+    const s=raw.replace(/^[・･●○◯◎■□◆◇★☆\-–]\s*/,"");if(!s)continue;
+    if(tpIsGroupLine(s)){const g=TP_Z2H(s).replace(/[【】［］\[\]〈〉<>《》:：]/g,"").replace(/[（(].*[)）]/,"").trim();items.push({name:`【${g}】`,amount:"",group:true});continue}
+    if(TP_AMT_ONLY.test(s)){items.push({name:"",amount:s,amtOnly:true});continue}
+    const p=tpSplitNameAmount(s);items.push({name:p.name,amount:p.amount});
+  }
+  // pair names and amounts that OCR split onto separate lines
+  const out=[];let i=0;
+  while(i<items.length){
+    const it=items[i];
+    if(it.group||it.amtOnly){if(!it.amtOnly)out.push(it);else if(out.length&&!out[out.length-1].amount&&!out[out.length-1].group)out[out.length-1].amount=it.amount;i++;continue}
+    if(it.amount){out.push(it);i++;continue}
+    // run of names without amounts
+    let j=i;while(j<items.length&&!items[j].group&&!items[j].amtOnly&&!items[j].amount)j++;
+    let k=j;while(k<items.length&&items[k].amtOnly)k++;
+    const names=items.slice(i,j),amts=items.slice(j,k);
+    if(names.length>1&&amts.length===names.length){names.forEach((n,x)=>out.push({name:n.name,amount:amts[x].amount}));i=k;continue}
+    out.push(it);i++;
+  }
+  return out.filter(x=>x.name).map(x=>({name:x.name,amount:x.amount||""}));
+}
+function tpSteps(lines){
+  const steps=[];let cur="";
+  const flush=()=>{const t=cur.trim();if(t)steps.push(t);cur=""};
+  const numbered=lines.filter(l=>TP_STEP_NUM.test(l)).length>=2;
+  for(const l of lines){
+    if(numbered&&TP_STEP_NUM.test(l)){flush();cur=l.replace(TP_STEP_NUM,"");continue}
+    cur+=(cur&&/[A-Za-z0-9]$/.test(cur)&&/^[A-Za-z0-9]/.test(l)?" ":"")+l;
+    if(!numbered&&/[。！!]$/.test(l))flush();
+  }
+  flush();
+  return steps;
+}
+function parseRecipeText(text){
+  const lines=String(text||"").split(/\r?\n/).map(tpCleanLine).filter(l=>l&&!/^[0-9０-９]{1,3}$/.test(l));
+  if(!lines.length)return null;
+  let iIng=lines.findIndex(l=>TP_H_ING.test(l)),iStep=lines.findIndex((l,x)=>x>iIng&&TP_H_STEP.test(l));
+  const iMemo=lines.findIndex((l,x)=>x>Math.max(iIng,iStep)&&TP_H_MEMO.test(l));
+  const head=lines.slice(0,iIng>=0?iIng:(iStep>=0?iStep:Math.min(3,lines.length)));
+  const all=TP_Z2H(lines.join("\n"));
+  const sv=all.match(/([0-9]+)\s*(?:[〜~～-]\s*[0-9]+\s*)?(?:人分|人前)/);
+  const tm=all.match(/(?:調理時間|所要時間|時間)\s*[:：]?\s*(?:約)?\s*([0-9]+)\s*分/);
+  const titleLine=head.find(l=>l.length>=2&&l.length<=30&&!/kcal|カロリー|^\d+$|人分|人前|調理時間|^P\.?\d+/i.test(TP_Z2H(l)))||"";
+  const title=titleLine.replace(/[【】「」]/g,"").trim();
+  let ingLines=[],stepLines=[],memoLines=[];
+  if(iIng>=0||iStep>=0){
+    const end=(a,...bs)=>{const c=bs.filter(b=>b>a);return c.length?Math.min(...c):lines.length};
+    if(iIng>=0){ingLines=lines.slice(iIng+1,end(iIng,iStep,iMemo));const rest=lines[iIng].replace(TP_H_ING,"").replace(/^[\s】］\]〉>》)）:：]*/,"").replace(/^[（(]?[0-9０-９]+\s*(?:人分|人前)[)）]?/,"").trim();if(rest)ingLines.unshift(rest)}
+    if(iStep>=0)stepLines=lines.slice(iStep+1,end(iStep,iMemo));
+    if(iMemo>=0)memoLines=lines.slice(iMemo+1);
+    if(iIng<0&&iStep>=0){ingLines=lines.slice(head.length?lines.indexOf(head[head.length-1])+1:0,iStep).filter(l=>l!==titleLine)}
+  }else{
+    for(const l of lines.slice(1)){
+      const ingLike=l.length<=24&&!/[、。，．]/.test(l)&&(tpSplitNameAmount(l).amount||TP_AMT_ONLY.test(l));
+      if(ingLike&&!stepLines.length)ingLines.push(l);else stepLines.push(l);
+    }
+  }
+  const ingredients=tpIngredients(ingLines.filter(l=>!/^[（(]?[0-9０-９]+\s*(?:人分|人前)[)）]?$/.test(l)));
+  const steps=tpSteps(stepLines);
+  if(!ingredients.length&&!steps.length)return {title,servings:sv?+sv[1]:null,minutes:tm?+tm[1]:null,ingredients:[],steps:[],memo:lines.join("\n"),failed:true};
+  return {title,servings:sv?+sv[1]:null,minutes:tm?+tm[1]:null,ingredients,steps,memo:memoLines.join("\n"),failed:false};
+}
+
 /* ---------- import from iPhone Shortcut ---------- */
 const SHORTCUT_JS="(async()=>{try{\n/* ---------- recipe import from web pages ---------- */\nconst Z2H=s=>String(s||\"\").replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));\nconst clean=s=>String(s||\"\").replace(/&emsp;|&ensp;|&nbsp;/g,\" \").replace(/[\\u2003\\u2002\\u00a0\\u3000]/g,\" \").replace(/\\s+/g,\" \").trim();\nfunction numFrom(s){const m=Z2H(s).match(/(\\d+(?:\\.\\d+)?)/);return m?Number(m[1]):null}\nfunction isoMinutes(s){if(!s)return null;const m=String(s).match(/P(?:\\d+D)?T?(?:(\\d+)H)?(?:(\\d+)M)?/i);if(!m)return null;const v=(+m[1]||0)*60+(+m[2]||0);return v||null}\nfunction textOf(el){if(!el)return \"\";const c=el.cloneNode(true);c.querySelectorAll(\"script,style,img,ul.howto-imglist-col1\").forEach(x=>x.remove());return clean(c.textContent)}\nfunction splitIng(line){\n  let s=clean(line).replace(/^[・･\\-–]\\s*/,\"\").replace(/^[├└┣┗│]\\s*/,\"\");\n  const m=s.match(/^(.*?)\\s*(?:[：:]|…|\\.{3}|‥)\\s*(.*)$/);\n  let name=m?m[1]:s,amount=m?m[2]:\"\";\n  name=name.replace(/^[├└┣┗│]\\s*/,\"\").trim();\n  if(!m){const k=s.match(/^(.*?)[\\s　]+([^\\s　]+)$/);if(k){name=k[1];amount=k[2]}}\n  return {name:name.trim(),amount:amount.trim()};\n}\nfunction groupIngs(lines){\n  const out=[];let group=\"\";\n  for(const raw of lines){\n    const s=clean(raw),tree=/[├└┣┗]/.test(s),sub=tree||/^[・･]/.test(s);\n    const i=splitIng(s);if(!i.name)continue;\n    if(!sub&&(!i.amount||/^[（(][＊*※]?\\d*[）)]$/.test(i.amount))){group=i.name.replace(/^[★☆●■◆◎]\\s*/,\"\");out.push({name:`【${group}】`,amount:\"\"});continue}\n    if(!sub)group=\"\";\n    out.push({name:tree&&group&&group.length<=3?`(${group}) ${i.name}`:i.name,amount:i.amount});\n  }\n  return out;\n}\nfunction findJsonLdRecipe(doc){\n  const out=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(x&&typeof x===\"object\"){if(x[\"@graph\"])walk(x[\"@graph\"]);out.push(x)}};\n  doc.querySelectorAll('script[type=\"application/ld+json\"]').forEach(s=>{try{walk(JSON.parse(s.textContent))}catch(e){}});\n  return out.find(x=>{const t=x[\"@type\"];return t===\"Recipe\"||(Array.isArray(t)&&t.includes(\"Recipe\"))})||null;\n}\nfunction stepsFromLd(ins){\n  const steps=[];\n  const walk=x=>{\n    if(!x)return;\n    if(typeof x===\"string\"){x.split(/\\n+/).map(clean).filter(Boolean).forEach(t=>steps.push(t));return}\n    if(Array.isArray(x)){x.forEach(walk);return}\n    if(x[\"@type\"]===\"HowToSection\"||x.itemListElement){walk(x.itemListElement);return}\n    if(x.text)steps.push(clean(x.text));else if(x.name)steps.push(clean(x.name));\n  };\n  walk(ins);\n  return steps.map(s=>s.replace(/^\\d+[\\.．、)]\\s*/,\"\"));\n}\nfunction fromJsonLd(r,doc){\n  const img=Array.isArray(r.image)?r.image[0]:r.image;\n  const imgUrl=typeof img===\"string\"?img:(img&&img.url)||null;\n  const yieldTxt=Array.isArray(r.recipeYield)?r.recipeYield.join(\" \"):r.recipeYield;\n  const kw=typeof r.keywords===\"string\"?r.keywords.split(/[,、]/):(r.keywords||[]);\n  const cat=[].concat(r.recipeCategory||[],r.recipeCuisine||[]);\n  return {\n    title:clean(r.name)||clean(doc.querySelector(\"h1\")&&doc.querySelector(\"h1\").textContent),\n    description:clean(r.description).slice(0,80),\n    minutes:isoMinutes(r.totalTime)||isoMinutes(r.cookTime)||null,\n    servings:numFrom(yieldTxt),\n    tags:[...cat,...kw].map(clean).filter(Boolean).slice(0,4),\n    ingredients:groupIngs([].concat(r.recipeIngredient||r.ingredients||[])),\n    steps:stepsFromLd(r.recipeInstructions),\n    memo:\"\",\n    image:imgUrl?String(imgUrl).trim():null\n  };\n}\nfunction fromSirogohan(doc){\n  const ttl=doc.querySelector(\".material-ttl\");\n  let title=ttl?clean(ttl.childNodes[0]&&ttl.childNodes[0].textContent).replace(/の材料$/,\"\"):\"\";\n  if(!title)title=clean(doc.querySelector(\"h1\")&&doc.querySelector(\"h1\").textContent).replace(/の?レシピ.*$/,\"\");\n  const servings=ttl?numFrom(ttl.querySelector(\"span\")&&ttl.querySelector(\"span\").textContent):null;\n  const ingredients=[];\n  doc.querySelectorAll(\"section.material ul\").forEach(ul=>{\n    const g=[...ul.classList].map(c=>c.match(/^([a-z])-list$/)).find(Boolean);\n    const prefix=g?`(${g[1].toUpperCase()}) `:\"\";\n    ul.querySelectorAll(\":scope > li\").forEach(li=>{const i=splitIng(li.textContent);if(i.name)ingredients.push({name:prefix+i.name,amount:i.amount})});\n  });\n  const steps=[],notes=[];\n  doc.querySelectorAll(\".howto-block\").forEach(b=>{\n    const h=b.querySelector(\".howto-ttl\");\n    if(!h||!/icon-num/.test(h.className))return;\n    b.querySelectorAll(\":scope > p\").forEach(p=>{\n      const t=textOf(p);if(!t)return;\n      if(p.classList.contains(\"note-text\")||/^[＊*※]/.test(t))notes.push(t.replace(/^[※＊*]\\s*/,\"※\"));else steps.push(t);\n    });\n  });\n  const desc=doc.querySelector('meta[name=\"description\"]');\n  const og=doc.querySelector('meta[property=\"og:image\"]');\n  const d0=desc?clean(desc.content):\"\";\n  return {title,description:/^白ごはん/.test(d0)?\"\":d0.slice(0,80),minutes:null,servings,tags:[],ingredients,steps,memo:notes.join(\"\\n\"),image:og?og.content:null};\n}\nconst SITE_PARSERS=[{host:/(^|\\.)sirogohan\\.com$/,parse:fromSirogohan}];\nfunction parseRecipeDoc(doc,url){\n  const host=new URL(url).hostname;\n  const site=SITE_PARSERS.find(p=>p.host.test(host));\n  let r=null;\n  if(site){try{r=site.parse(doc)}catch(e){r=null}}\n  if(!r||!r.ingredients.length){const ld=findJsonLdRecipe(doc);if(ld)r=fromJsonLd(ld,doc)}\n  if(!r||(!r.ingredients.length&&!r.steps.length))return null;\n  if(r.image){try{r.image=new URL(r.image,url).href}catch(e){r.image=null}}\n  return r;\n}\n\n\nconst r=parseRecipeDoc(document,location.href);\nif(!r){completion(\"ERROR:このページからレシピを見つけられませんでした。レシピ1品のページで試してください。\");return}\nlet photo=null;\nif(r.image){try{const bl=await (await fetch(r.image)).blob();const bm=await createImageBitmap(bl);const k=Math.min(1,800/Math.max(bm.width,bm.height));const c=document.createElement(\"canvas\");c.width=Math.round(bm.width*k);c.height=Math.round(bm.height*k);c.getContext(\"2d\").drawImage(bm,0,0,c.width,c.height);photo=c.toDataURL(\"image/jpeg\",0.72)}catch(e){}}\ncompletion(JSON.stringify({app:\"saki-recipe-import\",v:1,url:location.href,recipe:r,photo}));\n}catch(e){completion(\"ERROR:読み取り中にエラーが起きました（\"+e.message+\"）\")}})();\n";
+const BOOKMARKLET_JS="(async()=>{try{\n/* ---------- recipe import from web pages ---------- */\nconst Z2H=s=>String(s||\"\").replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));\nconst clean=s=>String(s||\"\").replace(/&emsp;|&ensp;|&nbsp;/g,\" \").replace(/[\\u2003\\u2002\\u00a0\\u3000]/g,\" \").replace(/\\s+/g,\" \").trim();\nfunction numFrom(s){const m=Z2H(s).match(/(\\d+(?:\\.\\d+)?)/);return m?Number(m[1]):null}\nfunction isoMinutes(s){if(!s)return null;const m=String(s).match(/P(?:\\d+D)?T?(?:(\\d+)H)?(?:(\\d+)M)?/i);if(!m)return null;const v=(+m[1]||0)*60+(+m[2]||0);return v||null}\nfunction textOf(el){if(!el)return \"\";const c=el.cloneNode(true);c.querySelectorAll(\"script,style,img,ul.howto-imglist-col1\").forEach(x=>x.remove());return clean(c.textContent)}\nfunction splitIng(line){\n  let s=clean(line).replace(/^[・･\\-–]\\s*/,\"\").replace(/^[├└┣┗│]\\s*/,\"\");\n  const m=s.match(/^(.*?)\\s*(?:[：:]|…|\\.{3}|‥)\\s*(.*)$/);\n  let name=m?m[1]:s,amount=m?m[2]:\"\";\n  name=name.replace(/^[├└┣┗│]\\s*/,\"\").trim();\n  if(!m){const k=s.match(/^(.*?)[\\s　]+([^\\s　]+)$/);if(k){name=k[1];amount=k[2]}}\n  return {name:name.trim(),amount:amount.trim()};\n}\nfunction groupIngs(lines){\n  const out=[];let group=\"\";\n  for(const raw of lines){\n    const s=clean(raw),tree=/[├└┣┗]/.test(s),sub=tree||/^[・･]/.test(s);\n    const i=splitIng(s);if(!i.name)continue;\n    if(!sub&&(!i.amount||/^[（(][＊*※]?\\d*[）)]$/.test(i.amount))){group=i.name.replace(/^[★☆●■◆◎]\\s*/,\"\");out.push({name:`【${group}】`,amount:\"\"});continue}\n    if(!sub)group=\"\";\n    out.push({name:tree&&group&&group.length<=3?`(${group}) ${i.name}`:i.name,amount:i.amount});\n  }\n  return out;\n}\nfunction findJsonLdRecipe(doc){\n  const out=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(x&&typeof x===\"object\"){if(x[\"@graph\"])walk(x[\"@graph\"]);out.push(x)}};\n  doc.querySelectorAll('script[type=\"application/ld+json\"]').forEach(s=>{try{walk(JSON.parse(s.textContent))}catch(e){}});\n  return out.find(x=>{const t=x[\"@type\"];return t===\"Recipe\"||(Array.isArray(t)&&t.includes(\"Recipe\"))})||null;\n}\nfunction stepsFromLd(ins){\n  const steps=[];\n  const walk=x=>{\n    if(!x)return;\n    if(typeof x===\"string\"){x.split(/\\n+/).map(clean).filter(Boolean).forEach(t=>steps.push(t));return}\n    if(Array.isArray(x)){x.forEach(walk);return}\n    if(x[\"@type\"]===\"HowToSection\"||x.itemListElement){walk(x.itemListElement);return}\n    if(x.text)steps.push(clean(x.text));else if(x.name)steps.push(clean(x.name));\n  };\n  walk(ins);\n  return steps.map(s=>s.replace(/^\\d+[\\.．、)]\\s*/,\"\"));\n}\nfunction fromJsonLd(r,doc){\n  const img=Array.isArray(r.image)?r.image[0]:r.image;\n  const imgUrl=typeof img===\"string\"?img:(img&&img.url)||null;\n  const yieldTxt=Array.isArray(r.recipeYield)?r.recipeYield.join(\" \"):r.recipeYield;\n  const kw=typeof r.keywords===\"string\"?r.keywords.split(/[,、]/):(r.keywords||[]);\n  const cat=[].concat(r.recipeCategory||[],r.recipeCuisine||[]);\n  return {\n    title:clean(r.name)||clean(doc.querySelector(\"h1\")&&doc.querySelector(\"h1\").textContent),\n    description:clean(r.description).slice(0,80),\n    minutes:isoMinutes(r.totalTime)||isoMinutes(r.cookTime)||null,\n    servings:numFrom(yieldTxt),\n    tags:[...cat,...kw].map(clean).filter(Boolean).slice(0,4),\n    ingredients:groupIngs([].concat(r.recipeIngredient||r.ingredients||[])),\n    steps:stepsFromLd(r.recipeInstructions),\n    memo:\"\",\n    image:imgUrl?String(imgUrl).trim():null\n  };\n}\nfunction fromSirogohan(doc){\n  const ttl=doc.querySelector(\".material-ttl\");\n  let title=ttl?clean(ttl.childNodes[0]&&ttl.childNodes[0].textContent).replace(/の材料$/,\"\"):\"\";\n  if(!title)title=clean(doc.querySelector(\"h1\")&&doc.querySelector(\"h1\").textContent).replace(/の?レシピ.*$/,\"\");\n  const servings=ttl?numFrom(ttl.querySelector(\"span\")&&ttl.querySelector(\"span\").textContent):null;\n  const ingredients=[];\n  doc.querySelectorAll(\"section.material ul\").forEach(ul=>{\n    const g=[...ul.classList].map(c=>c.match(/^([a-z])-list$/)).find(Boolean);\n    const prefix=g?`(${g[1].toUpperCase()}) `:\"\";\n    ul.querySelectorAll(\":scope > li\").forEach(li=>{const i=splitIng(li.textContent);if(i.name)ingredients.push({name:prefix+i.name,amount:i.amount})});\n  });\n  const steps=[],notes=[];\n  doc.querySelectorAll(\".howto-block\").forEach(b=>{\n    const h=b.querySelector(\".howto-ttl\");\n    if(!h||!/icon-num/.test(h.className))return;\n    b.querySelectorAll(\":scope > p\").forEach(p=>{\n      const t=textOf(p);if(!t)return;\n      if(p.classList.contains(\"note-text\")||/^[＊*※]/.test(t))notes.push(t.replace(/^[※＊*]\\s*/,\"※\"));else steps.push(t);\n    });\n  });\n  const desc=doc.querySelector('meta[name=\"description\"]');\n  const og=doc.querySelector('meta[property=\"og:image\"]');\n  const d0=desc?clean(desc.content):\"\";\n  return {title,description:/^白ごはん/.test(d0)?\"\":d0.slice(0,80),minutes:null,servings,tags:[],ingredients,steps,memo:notes.join(\"\\n\"),image:og?og.content:null};\n}\nconst SITE_PARSERS=[{host:/(^|\\.)sirogohan\\.com$/,parse:fromSirogohan}];\nfunction parseRecipeDoc(doc,url){\n  const host=new URL(url).hostname;\n  const site=SITE_PARSERS.find(p=>p.host.test(host));\n  let r=null;\n  if(site){try{r=site.parse(doc)}catch(e){r=null}}\n  if(!r||!r.ingredients.length){const ld=findJsonLdRecipe(doc);if(ld)r=fromJsonLd(ld,doc)}\n  if(!r||(!r.ingredients.length&&!r.steps.length))return null;\n  if(r.image){try{r.image=new URL(r.image,url).href}catch(e){r.image=null}}\n  return r;\n}\n\n\n\nconst box=(html,btn)=>{const o=document.getElementById(\"__rb_box\");if(o)o.remove();const d=document.createElement(\"div\");d.id=\"__rb_box\";d.style.cssText=\"position:fixed;z-index:2147483647;top:16px;right:16px;max-width:340px;background:#1f2a33;color:#fff;font:14px/1.6 -apple-system,'Hiragino Sans',sans-serif;padding:14px 16px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.3)\";d.innerHTML=html;if(btn){const b=document.createElement(\"button\");b.textContent=btn.label;b.style.cssText=\"margin-top:10px;background:#e2a93a;color:#1f2a33;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer\";b.onclick=btn.onclick;d.appendChild(b)}const x=document.createElement(\"button\");x.textContent=\"×\";x.style.cssText=\"position:absolute;top:4px;right:8px;background:none;border:0;color:#fff;font-size:18px;cursor:pointer\";x.onclick=()=>d.remove();d.appendChild(x);document.body.appendChild(d);return d};\nconst copy=async t=>{try{await navigator.clipboard.writeText(t);return true}catch(e){}try{const ta=document.createElement(\"textarea\");ta.value=t;ta.style.cssText=\"position:fixed;top:0;left:0;opacity:0\";document.body.appendChild(ta);ta.focus();ta.select();const ok=document.execCommand(\"copy\");ta.remove();return ok}catch(e){return false}};\nconst esc=t=>String(t).replace(/[&<>\"]/g,c=>({\"&\":\"&amp;\",\"<\":\"&lt;\",\">\":\"&gt;\",'\"':\"&quot;\"}[c]));\nconst r=parseRecipeDoc(document,location.href);\nif(!r){box(\"<b>レシピ帖</b><br>このページからレシピを見つけられませんでした。レシピ1品のページで試してください。\");return}\nbox(\"<b>レシピ帖</b><br>「\"+esc(r.title)+\"」を読み取っています…\");\nlet photo=null;\nif(r.image){try{const bl=await (await fetch(r.image)).blob();const bm=await createImageBitmap(bl);const k=Math.min(1,800/Math.max(bm.width,bm.height));const c=document.createElement(\"canvas\");c.width=Math.round(bm.width*k);c.height=Math.round(bm.height*k);c.getContext(\"2d\").drawImage(bm,0,0,c.width,c.height);photo=c.toDataURL(\"image/jpeg\",0.72)}catch(e){}}\nconst out=JSON.stringify({app:\"saki-recipe-import\",v:1,url:location.href,recipe:r,photo});\nconst done=()=>{const d=box(\"<b>レシピ帖</b><br>「\"+esc(r.title)+\"」をコピーしました。2分以内に、iPhoneのレシピ帖で「コピーしたレシピを追加」を押してください。\");setTimeout(()=>d.remove(),8000)};\nif(await copy(out))done();\nelse box(\"<b>レシピ帖</b><br>「\"+esc(r.title)+\"」を読み取りました。下のボタンでコピーしてください。\",{label:\"コピーする\",onclick:async()=>{if(await copy(out))done();else box(\"<b>レシピ帖</b><br>コピーできませんでした。\")}});\n}catch(e){alert(\"レシピ帖：読み取り中にエラーが起きました（\"+e.message+\"）\")}})();";
+const BOOKMARKLET_URL="javascript:"+encodeURIComponent(BOOKMARKLET_JS);
 function renderImport(){
   const m=S.imp;
   $app.innerHTML=`
-    <div class="bar"><button class="icon-btn" data-act="imp-close">← 一覧</button><h2 style="font-size:1rem">サイトから取り込む</h2><span style="width:60px"></span></div>
+    <div class="bar"><button class="icon-btn" data-act="imp-close">← 一覧</button><h2 style="font-size:1rem">レシピを取り込む</h2><span style="width:60px"></span></div>
     <div class="detail">
       <section class="section">
         <h3>コピーしたレシピを追加</h3>
-        <p class="desc">Safariでレシピのページを開き、共有ボタン →「レシピ帖に追加」を押したら、ここに戻って下のボタンを押してください。</p>
+        <p class="desc">ショートカットで読み取ったあと、ここに戻って下のボタンを押してください。メモアプリなどに書いたレシピの文章をコピーして追加することもできます。</p>
         <button class="btn primary" data-act="imp-clip" style="padding:14px">コピーしたレシピを追加</button>
         ${m.err?`<p class="err">${esc(m.err)}</p>`:""}
         <details ${m.fallback?"open":""}><summary class="desc" style="cursor:pointer">ボタンでうまくいかないとき</summary>
           <div class="field" style="margin-top:8px"><label for="imp-text">ここを長押しして「ペースト」</label><textarea id="imp-text" style="min-height:90px">${esc(m.text||"")}</textarea></div>
           <div class="form-actions"><button class="btn" data-act="imp-text">追加</button></div>
         </details>
-        <div class="sites"><span class="count">確認済みのサイト：</span>${["dancyu","白ごはん.com"].map(x=>`<span class="tag">${x}</span>`).join("")}<span class="count">ほか、レシピ情報を公開している多くのサイト</span></div>
       </section>
       <section class="section">
-        <h3>ショートカットの作り方 <small>最初に1回だけ</small></h3>
+        <h3>レシピサイトから</h3>
+        <p class="desc">Safariでレシピのページを開き、共有ボタン →「レシピ帖に追加」。</p>
+        <div class="sites"><span class="count">確認済みのサイト：</span>${["dancyu","白ごはん.com"].map(x=>`<span class="tag">${x}</span>`).join("")}<span class="count">ほか、レシピ情報を公開している多くのサイト</span></div>
+        <details><summary class="desc" style="cursor:pointer"><b>ショートカット「レシピ帖に追加」の作り方</b>（最初に1回だけ）</summary>
         <ol class="steps-guide">
           <li>iPhoneの「設定」→「アプリ」→「ショートカット」→「詳細」で、<b>「スクリプトの実行を許可」</b>をオンにします。</li>
           <li>「ショートカット」アプリを開き、右上の「＋」で新しいショートカットを作ります。名前は「レシピ帖に追加」にします。</li>
@@ -440,7 +529,35 @@ function renderImport(){
         </ol>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="copy-code">コードをコピー</button></div>
         <details><summary class="desc" style="cursor:pointer">コードを表示</summary><textarea id="sc-code" class="code" readonly style="width:100%;min-height:140px;border:none;margin-top:8px">${esc(SHORTCUT_JS)}</textarea></details>
-        <p class="desc" style="font-size:.85rem">初めてのサイトで使うときは「アクセスを許可しますか？」と聞かれるので「許可」を選んでください。</p>
+        <p class="desc" style="font-size:.85rem">「JavaScriptを実行」の「ウェブページ」が薄い文字のときは、タップして「ショートカットの入力」を選んでください。初めてのサイトでは「許可」を選びます。</p>
+        </details>
+      </section>
+      <section class="section">
+        <h3>Macから</h3>
+        <p class="desc">MacのSafariでは、ショートカットの代わりにブックマークを使います。レシピのページでお気に入りバーの「レシピ帖に追加」をクリックすると、iPhoneにコピーされます。</p>
+        <details><summary class="desc" style="cursor:pointer"><b>ブックマークの作り方</b>（Macで1回だけ）</summary>
+        <ol class="steps-guide" style="margin-top:8px">
+          <li>MacのSafariでこのページを開き、メニューの「表示」→「お気に入りバーを表示」を選びます。</li>
+          <li>下のボタンを、お気に入りバーへ<b>ドラッグ</b>します。</li>
+        </ol>
+        <div style="margin:10px 0"><a class="btn primary" id="bm-link" href="${esc(BOOKMARKLET_URL)}" style="text-decoration:none;display:inline-block" data-act="bm-click">レシピ帖に追加</a></div>
+        <p class="desc" style="font-size:.85rem">ドラッグできないとき：「コードをコピー（Mac用）」を押します。次に、Safariで適当なページを「ブックマーク」→「お気に入りに追加」します。お気に入りバーの項目を右クリック →「アドレスを編集」で中身を貼り付け、名前を「レシピ帖に追加」に変えます。</p>
+        <div><button class="btn" data-act="copy-bm">コードをコピー（Mac用）</button></div>
+        </details>
+      </section>
+      <section class="section">
+        <h3>本の写真から</h3>
+        <p class="desc">「写真」アプリで本のページの写真を開き、共有ボタン →「写真からレシピ」。</p>
+        <details><summary class="desc" style="cursor:pointer"><b>ショートカット「写真からレシピ」の作り方</b>（最初に1回だけ）</summary>
+        <ol class="steps-guide" style="margin-top:8px">
+          <li>「ショートカット」アプリの「＋」で新しいショートカットを作り、名前を「写真からレシピ」にします。</li>
+          <li>下の「ⓘ」を開き、<b>「共有シートに表示」</b>をオンにします。受け入れる種類は「イメージ」だけにします。</li>
+          <li>「アクションを追加」で「テキスト」と検索し、<b>「イメージからテキストを抽出」</b>を追加します。薄い文字の「イメージ」をタップして「ショートカットの入力」を選びます。</li>
+          <li>続けて<b>「クリップボードにコピー」</b>を追加して「完了」。</li>
+        </ol></details>
+        <details><summary class="desc" style="cursor:pointer">ショートカットを使わない方法</summary>
+          <p class="desc" style="margin-top:8px">「写真」アプリで写真を開き、右下の文字認識ボタン（四角に線のマーク）→ 文字を長押しして「すべてを選択」→「コピー」。そのあと上のボタンで追加できます。</p></details>
+        <p class="desc" style="font-size:.85rem">きれいに読み取るコツ：ページを真上から、明るい場所で撮り、レシピ1品だけが写るようにします。2段組みのページは順番がずれることがあるので、保存前に確認してください。</p>
       </section>
     </div>`;
 }
@@ -450,8 +567,11 @@ async function importPayload(text){
   if(text.startsWith("ERROR:")){m.err=text.slice(6);return render()}
   let d=null;try{d=JSON.parse(text)}catch(e){}
   if(!d||d.app!=="saki-recipe-import"||!d.recipe){
-    m.err=/^https?:\/\//.test(text)?"URLがコピーされています。Safariでそのページを開き、共有ボタンから「レシピ帖に追加」を使ってください。":"レシピ帖のショートカットでコピーした内容ではないようです。";
-    return render();
+    if(/^https?:\/\/\S+$/.test(text)){m.err="URLがコピーされています。Safariでそのページを開き、共有ボタンから「レシピ帖に追加」を使ってください。";return render()}
+    const t=parseRecipeText(text);
+    if(!t){m.err="読み取れる文字がありませんでした。";return render()}
+    S.draft={title:t.title,description:"",minutes:t.minutes||"",servings:t.servings||"",tags:[],ingredients:t.ingredients,steps:t.steps,memo:t.memo,sourceUrl:"",photo:null,imported:t.failed?"text-failed":"text"};
+    S.err="";S.photoFile=null;S.photoPreview=null;S.imp={err:""};S.view="edit";render();window.scrollTo(0,0);return;
   }
   const r=d.recipe,arr=x=>Array.isArray(x)?x:[];
   let photo=null;if(typeof d.photo==="string"&&d.photo.startsWith("data:image/")){try{photo=await (await fetch(d.photo)).blob()}catch(e){}}
@@ -524,6 +644,8 @@ $app.addEventListener("click",async e=>{
   else if(a==="nophoto"){readForm();S.draft.photo=null;S.photoFile=null;S.photoPreview=null;render()}
   else if(a==="export"){doExport()}
   else if(a==="import"){S.imp={err:""};S.view="import";render();window.scrollTo(0,0)}
+  else if(a==="bm-click"){e.preventDefault();toast("このボタンはお気に入りバーにドラッグして使います")}
+  else if(a==="copy-bm"){try{await navigator.clipboard.writeText(BOOKMARKLET_URL);toast("コードをコピーしました")}catch(err){toast("コピーできませんでした")}}
   else if(a==="imp-close"){S.view="list";render()}
   else if(a==="imp-clip"){let t="";try{t=await navigator.clipboard.readText()}catch(e){S.imp.err="クリップボードを読めませんでした。下の欄に貼り付けて「追加」を押してください。";S.imp.fallback=true;return render()}importPayload(t)}
   else if(a==="imp-text"){const v=document.getElementById("imp-text").value;S.imp.fallback=true;S.imp.text=v.length<2000?v:"";importPayload(v)}
