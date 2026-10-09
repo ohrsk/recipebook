@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>さきのレシピ帖</title>
+<meta name="theme-color" content="#eef1ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141a1d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="レシピ帖">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+html{-webkit-text-size-adjust:100%}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+
+/* Layout: one narrow column (max 560px) like a kitchen notebook propped on the counter; list → detail → edit as stacked views */
+:root{
+  --bg:#eef1ec;          /* pale sage, like a cutting board wash */
+  --surface:#ffffff;
+  --ink:#1f2a33;         /* deep indigo ink */
+  --muted:#5f6b70;
+  --line:#d7ddd5;
+  --accent:#c98a10;      /* saffron / mustard */
+  --accent-ink:#1f2a33;
+  --accent-soft:#f6e7c4;
+  --herb:#3e7a5a;        /* favorites / done */
+  --danger:#b3392f;
+  --shadow:0 1px 2px rgba(31,42,51,.06),0 4px 14px rgba(31,42,51,.06);
+  --f-display:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141a1d;--surface:#1d2529;--ink:#e8ece9;--muted:#9aa6a8;--line:#2f3a3f;
+  --accent:#e2a93a;--accent-ink:#141a1d;--accent-soft:#3a3020;--herb:#6cbf91;--danger:#e8776c;
+  --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141a1d;--surface:#1d2529;--ink:#e8ece9;--muted:#9aa6a8;--line:#2f3a3f;
+  --accent:#e2a93a;--accent-ink:#141a1d;--accent-soft:#3a3020;--herb:#6cbf91;--danger:#e8776c;
+  --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:0 96px}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.35}
+
+/* header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:14px 10px;display:grid;gap:10px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.brand h1{font-size:1.45rem;letter-spacing:.02em}
+.count{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.search{position:relative}
+.search input{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:11px 16px 11px 40px;font-size:16px}
+.search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--muted)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;font-size:.85rem;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip.fav[aria-pressed="true"]{background:var(--herb);border-color:var(--herb);color:#fff}
+.row-tools{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.row-tools select{border:none;background:transparent;color:var(--muted);font-size:.85rem;padding:2px 0}
+
+/* list */
+.list{display:grid;gap:10px;margin-top:6px}
+.card{display:grid;grid-template-columns:84px 1fr;gap:12px;align-items:center;background:var(--surface);border-radius:var(--r);padding:10px;box-shadow:var(--shadow);text-align:left;border:none;width:100%}
+.thumb{width:84px;height:84px;border-radius:10px;background:var(--accent-soft);object-fit:cover;display:grid;place-items:center;font-family:var(--f-display);font-size:1.7rem;color:var(--accent);overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.card-body{min-width:0;display:grid;gap:2px}
+.card h2{font-size:1.02rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.tags{display:flex;flex-wrap:wrap;gap:4px}
+.tag{font-size:.72rem;background:var(--accent-soft);color:var(--ink);border-radius:6px;padding:0 7px;line-height:1.7}
+.star{color:var(--herb)}
+.sample{font-size:.68rem;border:1px dashed var(--muted);color:var(--muted);border-radius:6px;padding:0 6px}
+
+.empty{background:var(--surface);border-radius:var(--r);padding:28px 20px;text-align:center;color:var(--muted);display:grid;gap:12px;justify-items:center;margin-top:12px}
+.empty h2{color:var(--ink);font-size:1.1rem}
+.banner{background:var(--accent-soft);border-radius:10px;padding:10px 14px;font-size:.85rem;margin-top:8px}
+
+/* FAB */
+.fab{position:fixed;right:max(16px,calc(50% - 264px));bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);border:none;border-radius:999px;padding:14px 22px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18);display:flex;gap:6px;align-items:center;font-family:var(--f-display);z-index:6}
+
+/* buttons */
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 16px;font-weight:500}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn.danger{color:var(--danger);border-color:var(--danger);background:transparent}
+.icon-btn{border:none;background:transparent;padding:8px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;color:var(--ink)}
+
+/* detail */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;justify-content:space-between;align-items:center;padding-block:10px;gap:8px}
+.bar-actions{display:flex;gap:2px}
+.hero{width:100%;aspect-ratio:4/3;max-width:100%;border-radius:var(--r);object-fit:cover;background:var(--accent-soft);display:block}
+.detail{display:grid;gap:18px}
+.detail h1{font-size:1.6rem}
+.desc{color:var(--muted);margin:0}
+.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.fact{background:var(--surface);border-radius:12px;padding:10px 14px;display:grid}
+.fact small{color:var(--muted);font-size:.75rem;letter-spacing:.06em}
+.fact b{font-family:var(--f-display);font-size:1.15rem;font-variant-numeric:tabular-nums}
+.section{background:var(--surface);border-radius:var(--r);padding:16px;display:grid;gap:10px}
+.section h3{font-size:1.05rem;display:flex;justify-content:space-between;align-items:baseline}
+.section h3 small{font-family:var(--f-body);font-weight:400;color:var(--muted);font-size:.78rem}
+.ing{list-style:none;margin:0;padding:0}
+.ing li{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px dotted var(--line)}
+.ing li:last-child{border-bottom:none}
+.ing label{display:flex;gap:10px;align-items:center;flex:1;min-width:0;cursor:pointer}
+.ing input{accent-color:var(--herb);width:18px;height:18px;flex:0 0 auto}
+.ing .amt{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.ing li.done span{text-decoration:line-through;color:var(--muted)}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:10px;counter-reset:s}
+.steps li{display:grid;grid-template-columns:30px 1fr;gap:10px;counter-increment:s;padding:6px;border-radius:10px}
+.steps li::before{content:counter(s);width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--ink);display:grid;place-items:center;font-family:var(--f-display);font-weight:700;font-size:.9rem}
+.steps li p{margin:0;min-width:0;overflow-wrap:anywhere}
+.cooking .steps li{font-size:1.2rem;line-height:1.8}
+.cooking .steps li.current{background:var(--accent-soft)}
+.cooking .steps li.current::before{background:var(--accent);color:var(--accent-ink)}
+.note{white-space:pre-wrap;margin:0}
+.del-confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--danger);border-radius:12px;padding:12px}
+.del-confirm p{margin:0;flex:1 1 100%}
+
+/* form */
+form{display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field label{font-weight:700;font-size:.9rem}
+.field .hint{font-size:.75rem;color:var(--muted)}
+.field input,.field textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:16px}
+.field textarea{resize:vertical;min-height:110px;line-height:1.7}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.photo-pick{display:grid;gap:8px}
+.photo-pick .preview{width:100%;aspect-ratio:4/3;max-width:100%;border-radius:12px;object-fit:cover;background:var(--accent-soft)}
+.photo-row{display:flex;gap:8px;flex-wrap:wrap}
+.form-actions{display:flex;gap:8px;justify-content:flex-end}
+.err{color:var(--danger);font-size:.85rem;margin:0}
+.fab-row{position:fixed;right:max(16px,calc(50% - 264px));bottom:calc(20px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;z-index:6}
+.fab-row .fab{position:static}
+.fab.sub{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);background:var(--surface);border-radius:12px;padding:4px;gap:4px}
+.tabs button{border:none;background:transparent;border-radius:9px;padding:8px 4px;font-weight:500;font-size:.9rem;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.imp{display:grid;gap:16px}
+.imp-lead{color:var(--muted);margin:0;font-size:.9rem}
+.drop{border:2px dashed var(--line);border-radius:var(--r);background:var(--surface);padding:24px 16px;text-align:center;display:grid;gap:8px;justify-items:center;color:var(--muted)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.shots figure{margin:0;position:relative;aspect-ratio:1;max-width:100%;border-radius:10px;overflow:hidden;background:var(--accent-soft)}
+.shots img{width:100%;height:100%;object-fit:cover}
+.shots button{position:absolute;top:4px;right:4px;border:none;border-radius:999px;width:26px;height:26px;background:rgba(0,0,0,.6);color:#fff;font-size:.8rem;line-height:1}
+.check{display:flex;gap:8px;align-items:center;font-size:.9rem}
+.check input{accent-color:var(--herb);width:18px;height:18px}
+.status{display:flex;gap:10px;align-items:center;background:var(--surface);border-radius:12px;padding:12px 14px;font-size:.9rem}
+.spin{width:18px;height:18px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);flex:0 0 auto}
+@media (prefers-reduced-motion:no-preference){.spin{animation:sp 0.9s linear infinite}}
+@keyframes sp{to{transform:rotate(360deg)}}
+.review{background:var(--accent-soft);border-radius:10px;padding:10px 14px;font-size:.85rem;margin:0}
+.src{font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
+.src a{color:var(--ink)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:.85rem;z-index:10}
+@media (prefers-reduced-motion:no-preference){.card{transition:transform .12s}.card:active{transform:scale(.985)}}
+
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty" style="margin-top:40px"><h2>さきのレシピ帖</h2><p>読み込んでいます…</p></div></div>
+<div class="toast" id="toast" hidden></div>
+<noscript><p style="padding:16px">このアプリを使うにはJavaScriptを有効にしてください。</p></noscript>
+<script>
+"use strict";
+/* ---------- storage (IndexedDB) ---------- */
+const DB_NAME="saki-recipe-book",DB_VER=1;
+let idb=null;
+function openDB(){return new Promise((ok,ng)=>{const r=indexedDB.open(DB_NAME,DB_VER);
+  r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains("recipes"))d.createObjectStore("recipes",{keyPath:"id"});if(!d.objectStoreNames.contains("photos"))d.createObjectStore("photos")};
+  r.onsuccess=()=>ok(r.result);r.onerror=()=>ng(r.error)})}
+function tx(store,mode,fn){return new Promise((ok,ng)=>{const t=idb.transaction(store,mode);const st=t.objectStore(store);let out;const req=fn(st);if(req)req.onsuccess=()=>{out=req.result};t.oncomplete=()=>ok(out);t.onerror=()=>ng(t.error);t.onabort=()=>ng(t.error)})}
+const dbAll=()=>tx("recipes","readonly",s=>s.getAll());
+const dbPut=r=>tx("recipes","readwrite",s=>s.put(r));
+const dbDel=id=>tx("recipes","readwrite",s=>s.delete(id));
+const photoGet=id=>tx("photos","readonly",s=>s.get(id));
+const photoPut=(id,b)=>tx("photos","readwrite",s=>s.put(b,id));
+const photoDel=id=>tx("photos","readwrite",s=>s.delete(id));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+
+/* ---------- state ---------- */
+const S={recipes:[],q:"",tag:null,fav:false,sort:lsGet("sort")||"new",view:"list",id:null,draft:null,photoFile:null,photoPreview:null,confirmDel:false,cooking:false,cur:0,checked:{},saving:false,err:"",bk:{msg:"",err:""},persist:null};
+const photoURLs=new Map();
+let wake=null;
+const $app=document.getElementById("app");
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl=u=>{try{const x=new URL(String(u||"").trim());return /^https?:$/.test(x.protocol)?x.href:null}catch(e){return null}};
+const hostOf=u=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return u}};
+const photoUrl=r=>r.photo?photoURLs.get(r.photo)||null:null;
+const initial=t=>esc((t||"？").trim().charAt(0));
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,1800)}
+
+async function loadPhoto(id){if(!id||photoURLs.has(id))return;try{const b=await photoGet(id);if(b)photoURLs.set(id,URL.createObjectURL(b))}catch(e){}}
+async function reload(){S.recipes=await dbAll();await Promise.all(S.recipes.map(r=>loadPhoto(r.photo)))}
+
+/* ---------- list ---------- */
+function allTags(){const m=new Map();S.recipes.forEach(r=>(r.tags||[]).forEach(t=>m.set(t,(m.get(t)||0)+1)));return [...m.entries()].sort((a,b)=>b[1]-a[1]).map(e=>e[0])}
+function filtered(){
+  const q=S.q.trim().toLowerCase();
+  const list=S.recipes.filter(r=>{
+    if(S.fav&&!r.favorite)return false;
+    if(S.tag&&!(r.tags||[]).includes(S.tag))return false;
+    if(!q)return true;
+    const hay=[r.title,r.description,...(r.tags||[]),...(r.ingredients||[]).map(i=>i.name)].join(" ").toLowerCase();
+    return q.split(/[\s　]+/).every(w=>hay.includes(w));
+  });
+  const by={new:(a,b)=>(b.updatedAt||0)-(a.updatedAt||0),time:(a,b)=>(a.minutes||999)-(b.minutes||999),name:(a,b)=>(a.title||"").localeCompare(b.title||"","ja")}[S.sort]||(()=>0);
+  return list.sort(by);
+}
+const searchIcon='<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
+const gearIcon='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>';
+
+function listBody(list){
+  if(S.recipes.length===0)return `<div class="empty"><h2>まだレシピがありません</h2><p>右下の「＋ 追加」から、材料と作り方を登録しましょう。写真も付けられます。</p><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><button class="btn primary" data-act="new">最初のレシピを追加</button><button class="btn" data-act="settings">バックアップから戻す</button></div></div>`;
+  if(list.length===0)return `<div class="empty"><h2>見つかりませんでした</h2><p>別のことばや材料名で探してみてください。</p><button class="btn" data-act="clear">条件をクリア</button></div>`;
+  return `<div class="list">${list.map(r=>`
+    <button class="card" data-open="${esc(r.id)}">
+      <div class="thumb">${photoUrl(r)?`<img src="${esc(photoUrl(r))}" alt="" loading="lazy">`:initial(r.title)}</div>
+      <div class="card-body">
+        <h2>${esc(r.title)}</h2>
+        <div class="meta">${r.minutes?`<span>⏱ ${esc(r.minutes)}分</span>`:""}${r.servings?`<span>${esc(r.servings)}人分</span>`:""}${r.favorite?`<span class="star">★ お気に入り</span>`:""}${r.sample?`<span class="sample">サンプル</span>`:""}</div>
+        ${(r.tags||[]).length?`<div class="tags">${r.tags.slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>`:""}
+      </div>
+    </button>`).join("")}</div>`;
+}
+function updateResults(){const list=filtered();document.getElementById("results").innerHTML=listBody(list);document.getElementById("shown").textContent=S.recipes.length?list.length+"件を表示":""}
+function backupNag(){
+  if(!S.recipes.some(r=>!r.sample))return "";
+  const last=+lsGet("lastBackup")||0,changed=Math.max(0,...S.recipes.map(r=>r.updatedAt||0));
+  if(changed<=last)return "";
+  if(last&&Date.now()-last<30*864e5)return "";
+  return `<button class="banner" data-act="settings" style="border:none;text-align:left;width:100%">${last?"前回のバックアップから30日以上たっています。":"まだバックアップがありません。"}機種変更に備えて、ときどき書き出しておきましょう →</button>`;
+}
+function renderList(){
+  const tags=allTags(),list=filtered();
+  $app.innerHTML=`
+    <header class="top">
+      <div class="brand"><h1>さきのレシピ帖</h1><div style="display:flex;align-items:center;gap:6px"><span class="count">${S.recipes.length}品</span><button class="icon-btn" data-act="settings" aria-label="バックアップと設定">${gearIcon}</button></div></div>
+      <div class="search">${searchIcon}<input id="q" type="search" placeholder="料理名・材料・タグで検索" value="${esc(S.q)}" autocomplete="off"></div>
+      <div class="chips" role="group" aria-label="絞り込み">
+        <button class="chip fav" data-fav aria-pressed="${S.fav}">★ お気に入り</button>
+        ${tags.map(t=>`<button class="chip" data-tag="${esc(t)}" aria-pressed="${S.tag===t}">${esc(t)}</button>`).join("")}
+      </div>
+      <div class="row-tools"><span class="count" id="shown">${S.recipes.length?list.length+"件を表示":""}</span>
+        <label><span class="count">並び順 </span><select id="sort" aria-label="並び順">
+          <option value="new" ${S.sort==="new"?"selected":""}>新しい順</option>
+          <option value="time" ${S.sort==="time"?"selected":""}>時短順</option>
+          <option value="name" ${S.sort==="name"?"selected":""}>名前順</option>
+        </select></label></div>
+      ${backupNag()}
+    </header>
+    <div id="results">${listBody(list)}</div>
+    <div class="fab-row"><button class="fab" data-act="new">＋ 追加</button></div>`;
+}
+
+/* ---------- detail ---------- */
+function renderDetail(){
+  const r=S.recipes.find(x=>x.id===S.id);
+  if(!r){S.view="list";return render()}
+  const chk=S.checked[r.id]||{};
+  $app.innerHTML=`
+    <div class="bar">
+      <button class="icon-btn" data-act="back" aria-label="一覧に戻る">← 一覧</button>
+      <div class="bar-actions">
+        <button class="icon-btn" data-act="fav" aria-label="お気に入り" style="color:${r.favorite?"var(--herb)":"var(--muted)"}">${r.favorite?"★":"☆"}</button>
+        <button class="icon-btn" data-act="edit">編集</button>
+      </div>
+    </div>
+    <article class="detail ${S.cooking?"cooking":""}">
+      ${photoUrl(r)?`<img class="hero" src="${esc(photoUrl(r))}" alt="${esc(r.title)}の写真">`:""}
+      <div style="display:grid;gap:8px">
+        <h1>${esc(r.title)}</h1>
+        ${r.description?`<p class="desc">${esc(r.description)}</p>`:""}
+        ${(r.tags||[]).length||r.sample?`<div class="tags">${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}${r.sample?`<span class="sample">サンプル</span>`:""}</div>`:""}
+      </div>
+      <div class="facts">
+        <div class="fact"><small>調理時間</small><b>${r.minutes?esc(r.minutes)+" 分":"—"}</b></div>
+        <div class="fact"><small>分量</small><b>${r.servings?esc(r.servings)+" 人分":"—"}</b></div>
+      </div>
+      <section class="section">
+        <h3>材料 <small>買ったものにチェック</small></h3>
+        ${(r.ingredients||[]).length?`<ul class="ing">${r.ingredients.map((i,k)=>`
+          <li class="${chk[k]?"done":""}"><label><input type="checkbox" data-chk="${k}" ${chk[k]?"checked":""}><span>${esc(i.name)}</span></label><span class="amt">${esc(i.amount)}</span></li>`).join("")}</ul>`:`<p class="desc">材料はまだ登録されていません。</p>`}
+      </section>
+      <section class="section">
+        <h3>作り方 <button class="btn ${S.cooking?"primary":""}" data-act="cook" style="padding:4px 12px;font-size:.85rem">${S.cooking?"調理モード終了":"調理モード"}</button></h3>
+        ${S.cooking?`<p class="desc" style="font-size:.8rem">手順をタップすると、今の手順に印が付きます。画面は消えにくくなります。</p>`:""}
+        ${(r.steps||[]).length?`<ol class="steps">${r.steps.map((s,k)=>`<li data-step="${k}" class="${S.cooking&&S.cur===k?"current":""}"><p>${esc(s)}</p></li>`).join("")}</ol>`:`<p class="desc">作り方はまだ登録されていません。</p>`}
+      </section>
+      ${safeUrl(r.sourceUrl)?`<p class="src">元のレシピ：<a href="${esc(safeUrl(r.sourceUrl))}" target="_blank" rel="noopener">${esc(hostOf(r.sourceUrl))}</a></p>`:""}
+      ${r.memo?`<section class="section"><h3>メモ・コツ</h3><p class="note">${esc(r.memo)}</p></section>`:""}
+      ${S.confirmDel?`<div class="del-confirm"><p>「${esc(r.title)}」を削除しますか？ 元に戻せません。</p><button class="btn danger" data-act="del-yes">削除する</button><button class="btn ghost" data-act="del-no">やめる</button></div>`
+        :`<div><button class="btn ghost" data-act="del" style="color:var(--danger)">このレシピを削除</button></div>`}
+    </article>`;
+}
+
+/* ---------- edit ---------- */
+function renderEdit(){
+  const d=S.draft;
+  const prev=S.photoPreview||(d.photo?photoURLs.get(d.photo):null);
+  $app.innerHTML=`
+    <div class="bar"><button class="icon-btn" data-act="cancel">← キャンセル</button><h2 style="font-size:1rem">${d.id?"レシピを編集":"新しいレシピ"}</h2><span style="width:60px"></span></div>
+    <form id="f" novalidate>
+      <div class="field"><label for="f-title">料理名</label><input id="f-title" name="title" value="${esc(d.title)}" placeholder="例：鶏の照り焼き" required></div>
+      <div class="field photo-pick"><label for="f-photo">写真</label>
+        ${prev?`<img class="preview" src="${esc(prev)}" alt="選んだ写真">`:""}
+        <div class="photo-row"><input id="f-photo" type="file" accept="image/*" hidden><button type="button" class="btn" data-act="pick">${prev?"写真を変更":"写真を選ぶ"}</button>${prev?`<button type="button" class="btn ghost" data-act="nophoto">写真を外す</button>`:""}</div></div>
+      <div class="field"><label for="f-desc">ひとこと</label><input id="f-desc" name="description" value="${esc(d.description)}" placeholder="例：甘辛だれでご飯がすすむ定番"></div>
+      <div class="two">
+        <div class="field"><label for="f-min">調理時間（分）</label><input id="f-min" name="minutes" type="number" inputmode="numeric" min="0" value="${esc(d.minutes||"")}"></div>
+        <div class="field"><label for="f-srv">分量（人分）</label><input id="f-srv" name="servings" type="number" inputmode="numeric" min="0" value="${esc(d.servings||"")}"></div>
+      </div>
+      <div class="field"><label for="f-tags">タグ</label><input id="f-tags" name="tags" value="${esc((d.tags||[]).join("、"))}" placeholder="例：和食、作り置き、お弁当"><span class="hint">「、」かスペースで区切ります</span></div>
+      <div class="field"><label for="f-ing">材料</label><textarea id="f-ing" name="ingredients" placeholder="鶏もも肉　1枚&#10;しょうゆ　大さじ2&#10;みりん　大さじ2">${esc((d.ingredients||[]).map(i=>i.amount?i.name+"　"+i.amount:i.name).join("\n"))}</textarea><span class="hint">1行に1つ。材料名と分量の間にスペースを入れます</span></div>
+      <div class="field"><label for="f-steps">作り方</label><textarea id="f-steps" name="steps" style="min-height:160px" placeholder="鶏肉の皮目をフォークで刺す&#10;フライパンで皮目から焼く">${esc((d.steps||[]).join("\n"))}</textarea><span class="hint">1行に1手順。番号は自動で付きます</span></div>
+      <div class="field"><label for="f-memo">メモ・コツ</label><textarea id="f-memo" name="memo" style="min-height:80px">${esc(d.memo)}</textarea></div>
+      <div class="field"><label for="f-src">元のレシピのURL</label><input id="f-src" name="sourceUrl" type="url" inputmode="url" value="${esc(d.sourceUrl||"")}" placeholder="https://"></div>
+      ${S.err?`<p class="err">${esc(S.err)}</p>`:""}
+      <div class="form-actions"><button type="button" class="btn ghost" data-act="cancel">キャンセル</button><button class="btn primary" type="submit" ${S.saving?"disabled":""}>${S.saving?"保存中…":"保存する"}</button></div>
+    </form>`;
+}
+
+/* ---------- settings / backup ---------- */
+function fmtDate(t){if(!t)return "まだありません";const d=new Date(t);return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`}
+function renderSettings(){
+  const last=+lsGet("lastBackup")||0;
+  const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  $app.innerHTML=`
+    <div class="bar"><button class="icon-btn" data-act="back">← 一覧</button><h2 style="font-size:1rem">バックアップと設定</h2><span style="width:60px"></span></div>
+    <div class="detail">
+      <section class="section">
+        <h3>バックアップ</h3>
+        <p class="desc">レシピはこのスマホの中だけに保存されています。機種変更やブラウザのデータ削除に備えて、ときどき書き出してください。写真もいっしょに保存されます。</p>
+        <div class="facts"><div class="fact"><small>レシピ</small><b>${S.recipes.length} 品</b></div><div class="fact"><small>前回の書き出し</small><b style="font-size:.95rem">${esc(fmtDate(last))}</b></div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="export">バックアップを書き出す</button><button class="btn" data-act="restore">ファイルから読み込む</button><input id="restore-file" type="file" accept=".json,application/json" hidden></div>
+        ${S.bk.msg?`<p class="review">${esc(S.bk.msg)}</p>`:""}${S.bk.err?`<p class="err">${esc(S.bk.err)}</p>`:""}
+        <p class="hint" style="font-size:.78rem;color:var(--muted);margin:0">書き出したファイルは、iCloud Drive・Googleドライブ・メールなどに保存しておくと安心です。読み込むと、同じレシピは上書きされ、それ以外は追加されます。</p>
+      </section>
+      <section class="section">
+        <h3>ホーム画面に追加</h3>
+        ${standalone?`<p class="desc">アプリとして開いています。電波がない場所でも使えます。</p>`:`<p class="desc">iPhoneはSafariの共有ボタン → 「ホーム画面に追加」、AndroidはChromeのメニュー → 「ホーム画面に追加」でアプリとして使えます。追加すると、保存したデータが消えにくくなります。</p>`}
+        <p class="desc" style="font-size:.85rem">データの保護：${S.persist===true?"このブラウザに長期保存を許可されています。":S.persist===false?"ブラウザの判断で消える可能性があります。ホーム画面に追加し、バックアップも取っておくと安心です。":"確認できませんでした。"}</p>
+      </section>
+    </div>`;
+}
+
+async function blobToDataURL(b){return await new Promise((ok,ng)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=ng;r.readAsDataURL(b)})}
+async function doExport(){
+  S.bk={msg:"書き出しています…",err:""};render();
+  try{
+    const photos={};
+    for(const r of S.recipes){if(r.photo){const b=await photoGet(r.photo);if(b)photos[r.photo]=await blobToDataURL(b)}}
+    const data={app:"saki-recipe-book",version:1,exportedAt:new Date().toISOString(),recipes:S.recipes,photos};
+    const d=new Date(),name=`recipe-backup-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.json`;
+    const file=new File([JSON.stringify(data)],name,{type:"application/json"});
+    let shared=false;
+    if(navigator.canShare&&navigator.canShare({files:[file]})&&/iPhone|iPad|Android/i.test(navigator.userAgent)){
+      try{await navigator.share({files:[file],title:"レシピのバックアップ"});shared=true}
+      catch(e){if(e&&e.name==="AbortError"){S.bk={msg:"",err:""};return render()}}
+    }
+    if(!shared){const a=document.createElement("a");a.href=URL.createObjectURL(file);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
+    lsSet("lastBackup",String(Date.now()));
+    S.bk={msg:`${S.recipes.length}品を「${name}」に書き出しました。`,err:""};
+  }catch(e){S.bk={msg:"",err:"書き出せませんでした。もう一度お試しください。"}}
+  render();
+}
+async function doRestore(file){
+  S.bk={msg:"読み込んでいます…",err:""};render();
+  try{
+    const data=JSON.parse(await file.text());
+    if(!data||data.app!=="saki-recipe-book"||!Array.isArray(data.recipes))throw new Error("format");
+    let n=0;
+    for(const r of data.recipes){
+      if(!r||!r.id||!r.title)continue;
+      if(r.photo&&data.photos&&data.photos[r.photo]){const b=await (await fetch(data.photos[r.photo])).blob();await photoPut(r.photo,b);photoURLs.delete(r.photo)}
+      await dbPut(r);n++;
+    }
+    await reload();
+    S.bk={msg:`${n}品を読み込みました。`,err:""};
+  }catch(e){S.bk={msg:"",err:"このファイルは読み込めませんでした。「バックアップを書き出す」で作ったファイルを選んでください。"}}
+  render();
+}
+
+/* ---------- actions ---------- */
+function render(){({list:renderList,detail:renderDetail,edit:renderEdit,settings:renderSettings}[S.view]||renderList)()}
+
+function parseIng(text){return text.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{const m=l.match(/^(.*?)[\s　]+([^\s　]+)$/);return m?{name:m[1].trim(),amount:m[2]}:{name:l,amount:""}})}
+async function resizeImage(file){
+  const img=await new Promise((ok,ng)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=ng;i.src=URL.createObjectURL(file)});
+  const max=1400,s=Math.min(1,max/Math.max(img.width,img.height));
+  const c=document.createElement("canvas");c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  return await new Promise(ok=>c.toBlob(ok,"image/jpeg",.84));
+}
+function readForm(){
+  const f=document.getElementById("f");if(!f)return;const g=n=>f.elements[n].value;
+  Object.assign(S.draft,{title:g("title"),description:g("description"),minutes:g("minutes"),servings:g("servings"),
+    tags:g("tags").split(/[、,，\s　]+/).map(t=>t.trim()).filter(Boolean),ingredients:parseIng(g("ingredients")),
+    steps:g("steps").split("\n").map(s=>s.trim()).filter(Boolean),memo:g("memo"),sourceUrl:g("sourceUrl")});
+}
+async function save(){
+  readForm();const d=S.draft;
+  if(!d.title.trim()){S.err="料理名を入力してください。";return render()}
+  S.saving=true;S.err="";render();
+  try{
+    const old=d.id?S.recipes.find(x=>x.id===d.id):null;
+    if(S.photoFile){
+      const blob=await resizeImage(S.photoFile),pid="p"+uid();
+      await photoPut(pid,blob);photoURLs.set(pid,URL.createObjectURL(blob));d.photo=pid;
+    }
+    if(old&&old.photo&&old.photo!==d.photo){photoDel(old.photo).catch(()=>{})}
+    const now=Date.now();
+    const rec={id:d.id||uid(),title:d.title.trim(),description:(d.description||"").trim(),minutes:Number(d.minutes)||null,servings:Number(d.servings)||null,
+      tags:d.tags,ingredients:d.ingredients,steps:d.steps,memo:(d.memo||"").trim(),sourceUrl:safeUrl(d.sourceUrl)||null,photo:d.photo||null,
+      favorite:!!d.favorite,createdAt:d.createdAt||now,updatedAt:now,sample:false};
+    await dbPut(rec);await reload();
+    S.id=rec.id;S.view="detail";S.draft=null;S.photoFile=null;S.photoPreview=null;S.saving=false;
+    toast("保存しました");render();window.scrollTo(0,0);
+  }catch(e){S.saving=false;S.err=e&&e.name==="QuotaExceededError"?"スマホの空き容量が足りません。":"保存できませんでした。もう一度お試しください。";render()}
+}
+async function setWake(on){try{if(on&&"wakeLock" in navigator){wake=await navigator.wakeLock.request("screen")}else if(wake){await wake.release();wake=null}}catch(e){}}
+
+$app.addEventListener("click",async e=>{
+  const t=e.target.closest("[data-act],[data-open],[data-tag],[data-fav],[data-step]");if(!t)return;
+  if(t.dataset.open){S.id=t.dataset.open;S.view="detail";S.confirmDel=false;S.cooking=false;S.cur=0;render();window.scrollTo(0,0);return}
+  if(t.dataset.tag!==undefined){S.tag=S.tag===t.dataset.tag?null:t.dataset.tag;render();return}
+  if(t.hasAttribute("data-fav")){S.fav=!S.fav;render();return}
+  if(t.dataset.step!==undefined){if(S.cooking){S.cur=+t.dataset.step;render()}return}
+  const a=t.dataset.act,r=S.recipes.find(x=>x.id===S.id);
+  if(a==="new"){S.draft={title:"",description:"",minutes:"",servings:"",tags:[],ingredients:[],steps:[],memo:"",photo:null,sourceUrl:""};S.err="";S.photoFile=null;S.photoPreview=null;S.view="edit";render();window.scrollTo(0,0)}
+  else if(a==="clear"){S.q="";S.tag=null;S.fav=false;render()}
+  else if(a==="back"){S.view="list";setWake(false);S.cooking=false;render()}
+  else if(a==="settings"){S.bk={msg:"",err:""};S.view="settings";render();window.scrollTo(0,0)}
+  else if(a==="edit"&&r){S.draft=JSON.parse(JSON.stringify(r));S.err="";S.photoFile=null;S.photoPreview=null;S.view="edit";setWake(false);S.cooking=false;render();window.scrollTo(0,0)}
+  else if(a==="cancel"){S.view=S.draft&&S.draft.id?"detail":"list";S.draft=null;S.photoFile=null;S.photoPreview=null;render()}
+  else if(a==="fav"&&r){await dbPut({...r,favorite:!r.favorite});await reload();toast(r.favorite?"お気に入りから外しました":"お気に入りに追加しました");render()}
+  else if(a==="cook"){S.cooking=!S.cooking;S.cur=0;setWake(S.cooking);render()}
+  else if(a==="del"){S.confirmDel=true;render()}
+  else if(a==="del-no"){S.confirmDel=false;render()}
+  else if(a==="del-yes"&&r){await dbDel(r.id);if(r.photo)photoDel(r.photo).catch(()=>{});await reload();S.view="list";S.confirmDel=false;toast("削除しました");render()}
+  else if(a==="pick"){readForm();document.getElementById("f-photo").click()}
+  else if(a==="nophoto"){readForm();S.draft.photo=null;S.photoFile=null;S.photoPreview=null;render()}
+  else if(a==="export"){doExport()}
+  else if(a==="restore"){document.getElementById("restore-file").click()}
+});
+$app.addEventListener("change",e=>{
+  if(e.target.id==="sort"){S.sort=e.target.value;lsSet("sort",S.sort);render()}
+  if(e.target.id==="f-photo"&&e.target.files[0]){readForm();S.photoFile=e.target.files[0];S.photoPreview=URL.createObjectURL(S.photoFile);render()}
+  if(e.target.id==="restore-file"&&e.target.files[0]){doRestore(e.target.files[0])}
+  if(e.target.dataset.chk!==undefined){const m=S.checked[S.id]||(S.checked[S.id]={});m[e.target.dataset.chk]=e.target.checked;e.target.closest("li").classList.toggle("done",e.target.checked)}
+});
+$app.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;if(!e.isComposing)updateResults()}});
+$app.addEventListener("compositionend",e=>{if(e.target.id==="q"){S.q=e.target.value;updateResults()}});
+$app.addEventListener("submit",e=>{e.preventDefault();save()});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&S.cooking)setWake(true)});
+
+/* ---------- first-run samples ---------- */
+const SAMPLES=[{"createdAt": 1791430000000, "description": "具だくさんで体が温まる", "favorite": false, "ingredients": [{"amount": "150g", "name": "豚こま切れ肉"}, {"amount": "5cm", "name": "大根"}, {"amount": "1/2本", "name": "にんじん"}, {"amount": "1/3本", "name": "ごぼう"}, {"amount": "800ml", "name": "だし"}, {"amount": "大さじ3", "name": "みそ"}], "memo": "みそを入れたら煮立たせない。", "minutes": 30, "photo": null, "sample": true, "servings": 4, "steps": ["野菜をいちょう切り、ごぼうはささがきにする", "鍋にごま油を熱し、豚肉と野菜を炒める", "だしを加えて、野菜がやわらかくなるまで15分煮る", "火を止めてみそを溶き入れる"], "tags": ["和食", "汁物", "作り置き"], "title": "豚汁", "updatedAt": 1791430000100, "id": "sample-misosoup", "sourceUrl": null}, {"createdAt": 1791430000000, "description": "5分でできる副菜", "favorite": false, "ingredients": [{"amount": "1束", "name": "ほうれん草"}, {"amount": "小さじ2", "name": "ごま油"}, {"amount": "小さじ1/2", "name": "鶏がらスープの素"}, {"amount": "適量", "name": "白いりごま"}], "memo": "", "minutes": 5, "photo": null, "sample": true, "servings": 2, "steps": ["ほうれん草を塩ゆでし、水にとって絞る", "4cm長さに切る", "調味料とあえ、ごまをふる"], "tags": ["副菜", "時短", "作り置き"], "title": "ほうれん草のナムル", "updatedAt": 1791430000200, "id": "sample-namul", "sourceUrl": null}, {"createdAt": 1791430000000, "description": "甘辛だれでご飯がすすむ定番", "favorite": true, "ingredients": [{"amount": "1枚", "name": "鶏もも肉"}, {"amount": "大さじ2", "name": "しょうゆ"}, {"amount": "大さじ2", "name": "みりん"}, {"amount": "大さじ1", "name": "酒"}, {"amount": "小さじ1", "name": "砂糖"}], "memo": "たれは焦げやすいので最後は火を弱めて。", "minutes": 20, "photo": null, "sample": true, "servings": 2, "steps": ["鶏肉の皮目をフォークで数か所刺す", "フライパンを熱し、皮目から中火で7分焼く", "裏返してふたをし、弱火で5分蒸し焼きにする", "余分な脂をふき取り、調味料を入れて煮からめる"], "tags": ["和食", "メイン", "お弁当"], "title": "鶏の照り焼き", "updatedAt": 1791430000300, "id": "sample-teriyaki", "sourceUrl": null}];
+
+(async()=>{
+  try{
+    idb=await openDB();
+    if(!lsGet("seeded")){const existing=await dbAll();if(!existing.length){for(const r of SAMPLES)await dbPut(r)}lsSet("seeded","1")}
+    await reload();
+  }catch(e){
+    $app.innerHTML=`<div class="empty" style="margin-top:40px"><h2>保存場所を開けませんでした</h2><p>プライベートブラウズを使っている場合は、通常のウィンドウで開いてください。</p></div>`;return;
+  }
+  render();
+  try{if(navigator.storage&&navigator.storage.persist){S.persist=await navigator.storage.persisted()||await navigator.storage.persist()}}catch(e){}
+  if("serviceWorker" in navigator&&location.protocol!=="file:"){navigator.serviceWorker.register("sw.js").catch(()=>{})}
+})();
+
+</script>
+</body>
+</html>
