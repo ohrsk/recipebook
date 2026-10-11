@@ -184,6 +184,17 @@ form{display:grid;gap:16px}
 .review{background:var(--accent-soft);border-radius:10px;padding:10px 14px;font-size:.85rem;margin:0}
 .src{font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
 .src a{color:var(--ink)}
+.crop{position:fixed;inset:0;z-index:50;background:rgba(10,14,16,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));color:#fff}
+.crop h2{font-size:1rem;color:#fff}
+.crop-frame{position:relative;width:min(100%,520px);aspect-ratio:4/3;max-width:100%;overflow:hidden;border-radius:6px;touch-action:none;cursor:grab;background:#000;box-shadow:0 0 0 2px #fff}
+.crop-frame img{position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.crop-grid{position:absolute;inset:0;pointer-events:none;background:linear-gradient(to right,transparent 33.2%,rgba(255,255,255,.35) 33.3%,transparent 33.5%,transparent 66.5%,rgba(255,255,255,.35) 66.6%,transparent 66.8%),linear-gradient(to bottom,transparent 33.2%,rgba(255,255,255,.35) 33.3%,transparent 33.5%,transparent 66.5%,rgba(255,255,255,.35) 66.6%,transparent 66.8%)}
+.crop-tools{display:flex;align-items:center;gap:12px;width:min(100%,520px)}
+.crop-tools input[type=range]{flex:1;accent-color:#e2a93a}
+.crop-tools button,.crop-actions button{border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;border-radius:10px;padding:8px 14px}
+.crop-actions{display:flex;gap:10px;justify-content:flex-end;width:min(100%,520px)}
+.crop-actions .ok{background:#e2a93a;border-color:#e2a93a;color:#1f2a33;font-weight:700}
+.crop p{margin:0;font-size:.8rem;color:rgba(255,255,255,.7)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:.85rem;z-index:10}
 @media (prefers-reduced-motion:no-preference){.card{transition:transform .12s}.card:active{transform:scale(.985)}}
 
@@ -342,7 +353,7 @@ function renderEdit(){
       <div class="field"><label for="f-title">料理名</label><input id="f-title" name="title" value="${esc(d.title)}" placeholder="例：鶏の照り焼き" required></div>
       <div class="field photo-pick"><label for="f-photo">写真</label>
         ${prev?`<img class="preview" src="${esc(prev)}" alt="選んだ写真">`:""}
-        <div class="photo-row"><input id="f-photo" type="file" accept="image/*" hidden><button type="button" class="btn" data-act="pick">${prev?"写真を変更":"写真を選ぶ"}</button>${prev?`<button type="button" class="btn ghost" data-act="nophoto">写真を外す</button>`:""}</div></div>
+        <div class="photo-row"><input id="f-photo" type="file" accept="image/*" hidden><button type="button" class="btn" data-act="pick">${prev?"写真を変更":"写真を選ぶ"}</button>${prev?`<button type="button" class="btn" data-act="crop">トリミング</button>`:""}${prev?`<button type="button" class="btn ghost" data-act="nophoto">写真を外す</button>`:""}</div></div>
       <div class="field"><label for="f-desc">ひとこと</label><input id="f-desc" name="description" value="${esc(d.description)}" placeholder="例：甘辛だれでご飯がすすむ定番"></div>
       <div class="field" style="max-width:50%"><label for="f-srv">分量（人分）</label><input id="f-srv" name="servings" type="number" inputmode="numeric" min="0" value="${esc(d.servings||"")}"></div>
       <div class="field"><label>タグ</label>
@@ -765,6 +776,41 @@ async function importPayload(text){
 /* ---------- actions ---------- */
 function render(){({list:renderList,detail:renderDetail,edit:renderEdit,settings:renderSettings,import:renderImport}[S.view]||renderList)()}
 
+/* ---------- photo crop (4:3, drag + zoom + rotate) ---------- */
+function openCrop(src){
+  const ov=document.createElement("div");ov.className="crop";ov.setAttribute("role","dialog");ov.setAttribute("aria-label","写真のトリミング");
+  ov.innerHTML=`<h2>写真のトリミング</h2><div class="crop-frame"><img alt=""><div class="crop-grid"></div></div>
+    <div class="crop-tools"><span aria-hidden="true">－</span><input type="range" min="1" max="4" step="0.01" value="1" aria-label="拡大"><span aria-hidden="true">＋</span><button type="button" data-c="rot" aria-label="右に90度回転">⟳ 回転</button></div>
+    <p>ドラッグで位置、スライダーか2本指で大きさを調整します</p>
+    <div class="crop-actions"><button type="button" data-c="cancel">キャンセル</button><button type="button" class="ok" data-c="ok">決定</button></div>`;
+  document.body.appendChild(ov);document.body.style.overflow="hidden";
+  const frame=ov.querySelector(".crop-frame"),img=ov.querySelector("img"),range=ov.querySelector("input");
+  let iw=0,ih=0,fw=0,fh=0,base=1,zoom=1,x=0,y=0,cur=src;
+  const sc=()=>base*zoom;
+  const clamp=()=>{const w=iw*sc(),h=ih*sc();x=Math.min(0,Math.max(fw-w,x));y=Math.min(0,Math.max(fh-h,y))};
+  const draw=()=>{clamp();img.style.transform=`translate(${x}px,${y}px) scale(${sc()})`};
+  const setZoom=(z,cx=fw/2,cy=fh/2)=>{z=Math.min(4,Math.max(1,z));const k=z/zoom;x=cx-(cx-x)*k;y=cy-(cy-y)*k;zoom=z;range.value=z;draw()};
+  const load=u=>{img.onload=()=>{iw=img.naturalWidth;ih=img.naturalHeight;const r=frame.getBoundingClientRect();fw=r.width;fh=r.height;base=Math.max(fw/iw,fh/ih);zoom=1;range.value=1;x=(fw-iw*base)/2;y=(fh-ih*base)/2;draw()};img.src=u};
+  load(cur);
+  range.addEventListener("input",()=>setZoom(+range.value));
+  const pts=new Map();let last=null,pinch=null;
+  frame.addEventListener("pointerdown",e=>{frame.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});last={x:e.clientX,y:e.clientY};if(pts.size===2){const [a,b]=[...pts.values()];pinch={d:Math.hypot(a.x-b.x,a.y-b.y),z:zoom}}});
+  frame.addEventListener("pointermove",e=>{if(!pts.has(e.pointerId))return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size>=2&&pinch){const [a,b]=[...pts.values()];const r=frame.getBoundingClientRect();setZoom(pinch.z*Math.hypot(a.x-b.x,a.y-b.y)/pinch.d,(a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top);return}
+    if(last){x+=e.clientX-last.x;y+=e.clientY-last.y;last={x:e.clientX,y:e.clientY};draw()}});
+  const up=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;const v=[...pts.values()][0];last=v?{x:v.x,y:v.y}:null};
+  frame.addEventListener("pointerup",up);frame.addEventListener("pointercancel",up);
+  frame.addEventListener("wheel",e=>{e.preventDefault();const r=frame.getBoundingClientRect();setZoom(zoom*(e.deltaY<0?1.08:1/1.08),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+  const close=()=>{ov.remove();document.body.style.overflow=""};
+  ov.addEventListener("click",async e=>{const b=e.target.closest("[data-c]");if(!b)return;
+    if(b.dataset.c==="cancel")close();
+    else if(b.dataset.c==="rot"){const c=document.createElement("canvas");c.width=ih;c.height=iw;const g=c.getContext("2d");g.translate(ih,0);g.rotate(Math.PI/2);g.drawImage(img,0,0);const bl=await new Promise(r=>c.toBlob(r,"image/jpeg",.92));cur=URL.createObjectURL(bl);load(cur)}
+    else if(b.dataset.c==="ok"){const W=1200,H=900,c=document.createElement("canvas");c.width=W;c.height=H;const s0=sc();c.getContext("2d").drawImage(img,-x/s0,-y/s0,fw/s0,fh/s0,0,0,W,H);
+      const bl=await new Promise(r=>c.toBlob(r,"image/jpeg",.86));if(bl){S.photoFile=bl;S.photoPreview=URL.createObjectURL(bl)}close();render()}});
+  ov.addEventListener("keydown",e=>{if(e.key==="Escape")close()});
+  ov.querySelector('[data-c="ok"]').focus();
+}
+
 function parseIng(text){return text.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{const m=l.match(/^(.*?)[\s　]+([^\s　]+)$/);return m?{name:m[1].trim(),amount:m[2]}:{name:l,amount:""}})}
 async function resizeImage(file){
   const img=await new Promise((ok,ng)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=ng;i.src=URL.createObjectURL(file)});
@@ -827,6 +873,7 @@ $app.addEventListener("click",async e=>{
   else if(a==="del-no"){S.confirmDel=false;render()}
   else if(a==="del-yes"&&r){await dbDel(r.id);if(r.photo)photoDel(r.photo).catch(()=>{});await reload();S.view="list";S.confirmDel=false;toast("削除しました");render()}
   else if(a==="pick"){readForm();document.getElementById("f-photo").click()}
+  else if(a==="crop"){readForm();const src=S.photoPreview||(S.draft.photo?photoURLs.get(S.draft.photo):null);if(src)openCrop(src)}
   else if(a==="nophoto"){readForm();S.draft.photo=null;S.photoFile=null;S.photoPreview=null;render()}
   else if(a==="export"){doExport()}
   else if(a==="import"){S.imp={err:""};S.view="import";render();window.scrollTo(0,0)}
